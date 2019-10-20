@@ -3,18 +3,12 @@ package nspawn
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"strconv"
-	"strings"
 	"time"
 
 	hclog "github.com/hashicorp/go-hclog"
 	// "github.com/hashicorp/nomad/client/stats"
-	systemdDbus "github.com/coreos/go-systemd/dbus"
-	// machined "github.com/coreos/go-systemd/machine1"
-	systemdUtil "github.com/coreos/go-systemd/util"
 	// "github.com/godbus/dbus"
-	cstructs "github.com/hashicorp/nomad/client/structs"
+	// cstructs "github.com/hashicorp/nomad/client/structs"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
@@ -50,11 +44,6 @@ var (
 			hclspec.NewAttr("enabled", "bool", false),
 			hclspec.NewLiteral("true"),
 		),
-		// "volumes_enabled": hclspec.NewDefault(
-		// 	hclspec.NewAttr("volumes_enabled", "bool", false),
-		// 	hclspec.NewLiteral("true"),
-		// ),
-		// "lxc_path": hclspec.NewAttr("lxc_path", "string", false),
 	})
 
 	// taskConfigSpec is the hcl specification for the driver config section of
@@ -103,6 +92,20 @@ type Driver struct {
 type Config struct {
 	// Enabled is set to true to enable the nspawn driver
 	Enabled bool `codec:"enabled"`
+}
+
+// TaskConfig is the driver configuration of a task within a job
+type TaskConfig struct {
+	Image string `codec:"image"`
+}
+
+// TaskState is the state which is encoded in the handle returned in
+// StartTask. This information is needed to rebuild the task state and handler
+// during recovery.
+type TaskState struct {
+	TaskConfig    *drivers.TaskConfig
+	ContainerName string
+	StartedAt     time.Time
 }
 
 // NewNspawnDriver returns a new nspawn driver object
@@ -189,20 +192,35 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 func (d *Driver) DestroyTask(taskID string, force bool) error {
 	return nil
 }
+
 func (d *Driver) InspectTask(taskID string) (*drivers.TaskStatus, error) {
-	return nil, nil
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return nil, drivers.ErrTaskNotFound
+	}
+
+	return handle.TaskStatus(), nil
 }
-func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Duration) (<-chan *cstructs.TaskResourceUsage, error) {
-	return nil, nil
+
+func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Duration) (<-chan *drivers.TaskResourceUsage, error) {
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return nil, drivers.ErrTaskNotFound
+	}
+
+	return handle.stats(ctx, interval)
 }
-func (d *Driver) TaskEvents(context.Context) (<-chan *drivers.TaskEvent, error) {
-	return nil, nil
+
+func (d *Driver) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, error) {
+	return d.eventer.TaskEvents(ctx)
 }
+
 func (d *Driver) SignalTask(taskID string, signal string) error {
-	return nil
+	return fmt.Errorf("Nspawn driver does not support signals")
 }
+
 func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
-	return nil, nil
+	return nil, fmt.Errorf("Nspawn driver does not support exec")
 }
 
 func (d *Driver) PluginInfo() (*base.PluginInfoResponse, error) {
@@ -227,42 +245,4 @@ func (d *Driver) SetConfig(cfg *base.Config) error {
 	}
 
 	return nil
-}
-
-func isInstalled() error {
-	_, err := exec.LookPath("systemd-nspawn")
-	if err != nil {
-		return err
-	}
-	_, err = exec.LookPath("machinectl")
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// systemdVersion uses dbus to check which version of systemd is installed.
-func systemdVersion() (string, error) {
-	// check if systemd is running
-	if !systemdUtil.IsRunningSystemd() {
-		return "null", fmt.Errorf("systemd is not running")
-	}
-	bus, err := systemdDbus.NewSystemdConnection()
-	if err != nil {
-		return "null", err
-	}
-	defer bus.Close()
-	// get the systemd version
-	verString, err := bus.GetManagerProperty("Version")
-	if err != nil {
-		return "null", err
-	}
-	// lose the surrounding quotes
-	verNumString, err := strconv.Unquote(verString)
-	if err != nil {
-		return "null", err
-	}
-	// trim possible version suffix like in "242.19-1"
-	verNum := strings.Split(verNumString, ".")[0]
-	return verNum, nil
 }
