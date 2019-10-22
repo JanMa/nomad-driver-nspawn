@@ -3,12 +3,11 @@ package nspawn
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"time"
 
 	hclog "github.com/hashicorp/go-hclog"
-	// "github.com/hashicorp/nomad/client/stats"
-	// "github.com/godbus/dbus"
-	// cstructs "github.com/hashicorp/nomad/client/structs"
+	"github.com/hashicorp/nomad/client/stats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
@@ -180,13 +179,80 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 func (d *Driver) RecoverTask(*drivers.TaskHandle) error {
 	return nil
 }
-func (d *Driver) StartTask(*drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
-	return nil, nil, nil
+
+func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
+	if _, ok := d.tasks.Get(cfg.ID); ok {
+		return nil, nil, fmt.Errorf("task with ID %q already started", cfg.ID)
+	}
+
+	var driverConfig TaskConfig
+	if err := cfg.DecodeDriverConfig(&driverConfig); err != nil {
+		return nil, nil, fmt.Errorf("failed to decode driver config: %v", err)
+	}
+
+	d.logger.Info("starting nspawn task", "driver_cfg", hclog.Fmt("%+v", driverConfig))
+	handle := drivers.NewTaskHandle(taskHandleVersion)
+	handle.Config = cfg
+
+	cmd := exec.Command("systemd-nspawn", "-b", "-D", driverConfig.Image, "-n", "-U", "-M", cfg.AllocID, "-x")
+	err := cmd.Start()
+	if err != nil {
+		d.logger.Error("failed to start task, error starting container", "error", err)
+		return nil, nil, fmt.Errorf("failed to start task: %v", err)
+	}
+
+	// wait for boot
+	var p *MachineProps
+	var e error
+	for {
+		time.Sleep(1 * time.Second)
+		p, e = DescribeMachine(cfg.AllocID)
+		if e == nil {
+			break
+		} else {
+			d.logger.Info("retrying to get machine information in one second")
+		}
+	}
+	if e != nil {
+		d.logger.Error("failed to get machine information", "error", e)
+		return nil, nil, e
+	}
+	d.logger.Info("gathered information about new machine", "name", p.Name, "leader", p.Leader)
+
+	h := &taskHandle{
+		machine: p,
+		logger:  d.logger,
+
+		totalCpuStats:  stats.NewCpuStats(),
+		userCpuStats:   stats.NewCpuStats(),
+		systemCpuStats: stats.NewCpuStats(),
+
+		taskConfig: cfg,
+		procState:  drivers.TaskStateRunning,
+		startedAt:  time.Unix(int64(p.Timestamp)/1000000, 0),
+	}
+
+	driverState := TaskState{
+		ContainerName: p.Name,
+		TaskConfig:    cfg,
+		StartedAt:     h.startedAt,
+	}
+
+	if err := handle.SetDriverState(&driverState); err != nil {
+		d.logger.Error("failed to start task, error setting driver state", "error", err)
+		return nil, nil, fmt.Errorf("failed to set driver state: %v", err)
+	}
+
+	d.tasks.Set(cfg.ID, h)
+
+	return handle, nil, nil
 }
+
 func (d *Driver) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {
 	return nil, nil
 }
 func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) error {
+
 	return nil
 }
 func (d *Driver) DestroyTask(taskID string, force bool) error {
