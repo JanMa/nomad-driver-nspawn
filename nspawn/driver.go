@@ -10,7 +10,6 @@ import (
 
 	"github.com/containerd/cgroups"
 	hclog "github.com/hashicorp/go-hclog"
-	// "github.com/hashicorp/nomad/client/lib/fifo"
 	"github.com/hashicorp/nomad/client/stats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/plugins/base"
@@ -376,6 +375,23 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 }
 
 func (d *Driver) DestroyTask(taskID string, force bool) error {
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return drivers.ErrTaskNotFound
+	}
+
+	if handle.IsRunning() && !force {
+		return fmt.Errorf("cannot destroy running task")
+	}
+
+	if handle.IsRunning() {
+		// grace period is chosen arbitrary here
+		if err := handle.shutdown(1 * time.Minute); err != nil {
+			handle.logger.Error("failed to destroy executor", "err", err)
+		}
+	}
+
+	d.tasks.Delete(taskID)
 	return nil
 }
 
