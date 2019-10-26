@@ -65,6 +65,11 @@ func IntToPtr(i int) *int {
 	return &i
 }
 
+// Int8ToPtr returns the pointer to an int8
+func Int8ToPtr(i int8) *int8 {
+	return &i
+}
+
 // Int64ToPtr returns the pointer to an int
 func Int64ToPtr(i int64) *int64 {
 	return &i
@@ -183,6 +188,31 @@ func SliceSetDisjoint(first, second []string) (bool, []string) {
 		flattened = append(flattened, k)
 	}
 	return false, flattened
+}
+
+// CompareSliceSetString returns true if the slices contain the same strings.
+// Order is ignored. The slice may be copied but is never altered. The slice is
+// assumed to be a set. Multiple instances of an entry are treated the same as
+// a single instance.
+func CompareSliceSetString(a, b []string) bool {
+	n := len(a)
+	if n != len(b) {
+		return false
+	}
+
+	// Copy a into a map and compare b against it
+	amap := make(map[string]struct{}, n)
+	for i := range a {
+		amap[a[i]] = struct{}{}
+	}
+
+	for i := range b {
+		if _, ok := amap[b[i]]; !ok {
+			return false
+		}
+	}
+
+	return true
 }
 
 // CompareMapStringString returns true if the maps are equivalent. A nil and

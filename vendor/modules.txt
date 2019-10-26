@@ -1,0 +1,215 @@
+# github.com/LK4D4/joincontext v0.0.0-20171026170139-1724345da6d5
+github.com/LK4D4/joincontext
+# github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d
+github.com/StackExchange/wmi
+# github.com/armon/go-metrics v0.0.0-20190430140413-ec5e00d3c878
+github.com/armon/go-metrics
+# github.com/containerd/cgroups v0.0.0-20191011165608-5fbad35c2a7e
+github.com/containerd/cgroups
+github.com/containerd/cgroups/stats/v1
+# github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f
+github.com/coreos/go-systemd/dbus
+github.com/coreos/go-systemd/machine1
+github.com/coreos/go-systemd/util
+# github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
+github.com/coreos/pkg/dlopen
+# github.com/docker/go-units v0.4.0
+github.com/docker/go-units
+# github.com/go-ole/go-ole v1.2.4
+github.com/go-ole/go-ole
+github.com/go-ole/go-ole/oleutil
+# github.com/godbus/dbus v0.0.0-20190422162347-ade71ed3457e
+github.com/godbus/dbus
+# github.com/gogo/protobuf v1.2.1
+github.com/gogo/protobuf/gogoproto
+github.com/gogo/protobuf/proto
+github.com/gogo/protobuf/protoc-gen-gogo/descriptor
+# github.com/golang/protobuf v1.3.2
+github.com/golang/protobuf/proto
+github.com/golang/protobuf/ptypes
+github.com/golang/protobuf/ptypes/any
+github.com/golang/protobuf/ptypes/duration
+github.com/golang/protobuf/ptypes/timestamp
+github.com/golang/protobuf/ptypes/wrappers
+# github.com/gorhill/cronexpr v0.0.0-20180427100037-88b0669f7d75
+github.com/gorhill/cronexpr
+# github.com/hashicorp/consul/api v1.2.0
+github.com/hashicorp/consul/api
+# github.com/hashicorp/errwrap v1.0.0
+github.com/hashicorp/errwrap
+# github.com/hashicorp/go-cleanhttp v0.5.1
+github.com/hashicorp/go-cleanhttp
+# github.com/hashicorp/go-hclog v0.9.2
+github.com/hashicorp/go-hclog
+# github.com/hashicorp/go-immutable-radix v1.1.0
+github.com/hashicorp/go-immutable-radix
+# github.com/hashicorp/go-msgpack v0.5.5
+github.com/hashicorp/go-msgpack/codec
+# github.com/hashicorp/go-multierror v1.0.0
+github.com/hashicorp/go-multierror
+# github.com/hashicorp/go-plugin v1.0.1
+github.com/hashicorp/go-plugin
+github.com/hashicorp/go-plugin/internal/plugin
+# github.com/hashicorp/go-rootcerts v1.0.0
+github.com/hashicorp/go-rootcerts
+# github.com/hashicorp/go-version v1.2.0
+github.com/hashicorp/go-version
+# github.com/hashicorp/golang-lru v0.5.3
+github.com/hashicorp/golang-lru
+github.com/hashicorp/golang-lru/simplelru
+# github.com/hashicorp/hcl v1.0.0
+github.com/hashicorp/hcl
+github.com/hashicorp/hcl/hcl/ast
+github.com/hashicorp/hcl/hcl/parser
+github.com/hashicorp/hcl/hcl/scanner
+github.com/hashicorp/hcl/hcl/strconv
+github.com/hashicorp/hcl/hcl/token
+github.com/hashicorp/hcl/json/parser
+github.com/hashicorp/hcl/json/scanner
+github.com/hashicorp/hcl/json/token
+# github.com/hashicorp/nomad v0.10.0
+github.com/hashicorp/nomad/acl
+github.com/hashicorp/nomad/client/allocdir
+github.com/hashicorp/nomad/client/stats
+github.com/hashicorp/nomad/client/structs
+github.com/hashicorp/nomad/drivers/shared/eventer
+github.com/hashicorp/nomad/helper
+github.com/hashicorp/nomad/helper/args
+github.com/hashicorp/nomad/helper/flatmap
+github.com/hashicorp/nomad/helper/pluginutils/grpcutils
+github.com/hashicorp/nomad/helper/stats
+github.com/hashicorp/nomad/helper/uuid
+github.com/hashicorp/nomad/lib/kheap
+github.com/hashicorp/nomad/nomad/structs
+github.com/hashicorp/nomad/plugins
+github.com/hashicorp/nomad/plugins/base
+github.com/hashicorp/nomad/plugins/base/proto
+github.com/hashicorp/nomad/plugins/base/structs
+github.com/hashicorp/nomad/plugins/device
+github.com/hashicorp/nomad/plugins/device/proto
+github.com/hashicorp/nomad/plugins/drivers
+github.com/hashicorp/nomad/plugins/drivers/proto
+github.com/hashicorp/nomad/plugins/drivers/utils
+github.com/hashicorp/nomad/plugins/shared/hclspec
+github.com/hashicorp/nomad/plugins/shared/structs
+github.com/hashicorp/nomad/plugins/shared/structs/proto
+# github.com/hashicorp/raft v1.1.1
+github.com/hashicorp/raft
+# github.com/hashicorp/serf v0.8.2
+github.com/hashicorp/serf/coordinate
+# github.com/hashicorp/yamux v0.0.0-20180604194846-3520598351bb
+github.com/hashicorp/yamux
+# github.com/hpcloud/tail v1.0.0
+github.com/hpcloud/tail/util
+github.com/hpcloud/tail/watch
+# github.com/mitchellh/copystructure v1.0.0
+github.com/mitchellh/copystructure
+# github.com/mitchellh/go-homedir v1.0.0
+github.com/mitchellh/go-homedir
+# github.com/mitchellh/go-testing-interface v1.0.0
+github.com/mitchellh/go-testing-interface
+# github.com/mitchellh/hashstructure v1.0.0
+github.com/mitchellh/hashstructure
+# github.com/mitchellh/mapstructure v1.1.2
+github.com/mitchellh/mapstructure
+# github.com/mitchellh/reflectwalk v1.0.0
+github.com/mitchellh/reflectwalk
+# github.com/oklog/run v1.0.0
+github.com/oklog/run
+# github.com/opencontainers/runtime-spec v0.1.2-0.20190507144316-5b71a03e2700
+github.com/opencontainers/runtime-spec/specs-go
+# github.com/pkg/errors v0.8.1
+github.com/pkg/errors
+# github.com/ryanuber/go-glob v1.0.0
+github.com/ryanuber/go-glob
+# github.com/shirou/gopsutil v2.19.9+incompatible => github.com/hashicorp/gopsutil v2.17.13-0.20190117153606-62d5761ddb7d+incompatible
+github.com/shirou/gopsutil/cpu
+github.com/shirou/gopsutil/disk
+github.com/shirou/gopsutil/host
+github.com/shirou/gopsutil/internal/common
+github.com/shirou/gopsutil/mem
+github.com/shirou/gopsutil/net
+github.com/shirou/gopsutil/process
+# github.com/shirou/w32 v0.0.0-20160930032740-bb4de0191aa4
+github.com/shirou/w32
+# github.com/ugorji/go v1.1.7 => github.com/hashicorp/go-msgpack v0.0.0-20190927123313-23165f7bc3c2
+github.com/ugorji/go/codec
+# github.com/vmihailenco/msgpack v3.3.3+incompatible
+github.com/vmihailenco/msgpack
+github.com/vmihailenco/msgpack/codes
+# github.com/zclconf/go-cty v1.1.0
+github.com/zclconf/go-cty/cty
+github.com/zclconf/go-cty/cty/convert
+github.com/zclconf/go-cty/cty/msgpack
+github.com/zclconf/go-cty/cty/set
+# golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550
+golang.org/x/crypto/blake2b
+# golang.org/x/net v0.0.0-20191021144547-ec77196f6094
+golang.org/x/net/context
+golang.org/x/net/http/httpguts
+golang.org/x/net/http2
+golang.org/x/net/http2/hpack
+golang.org/x/net/idna
+golang.org/x/net/internal/timeseries
+golang.org/x/net/trace
+# golang.org/x/sys v0.0.0-20191026070338-33540a1f6037
+golang.org/x/sys/cpu
+golang.org/x/sys/unix
+golang.org/x/sys/windows
+# golang.org/x/text v0.3.0
+golang.org/x/text/secure/bidirule
+golang.org/x/text/transform
+golang.org/x/text/unicode/bidi
+golang.org/x/text/unicode/norm
+# google.golang.org/appengine v1.1.0
+google.golang.org/appengine
+google.golang.org/appengine/datastore
+google.golang.org/appengine/internal
+google.golang.org/appengine/internal/app_identity
+google.golang.org/appengine/internal/base
+google.golang.org/appengine/internal/datastore
+google.golang.org/appengine/internal/log
+google.golang.org/appengine/internal/modules
+google.golang.org/appengine/internal/remote_api
+# google.golang.org/genproto v0.0.0-20180817151627-c66870c02cf8
+google.golang.org/genproto/googleapis/rpc/status
+# google.golang.org/grpc v1.24.0
+google.golang.org/grpc
+google.golang.org/grpc/balancer
+google.golang.org/grpc/balancer/base
+google.golang.org/grpc/balancer/roundrobin
+google.golang.org/grpc/binarylog/grpc_binarylog_v1
+google.golang.org/grpc/codes
+google.golang.org/grpc/connectivity
+google.golang.org/grpc/credentials
+google.golang.org/grpc/credentials/internal
+google.golang.org/grpc/encoding
+google.golang.org/grpc/encoding/proto
+google.golang.org/grpc/grpclog
+google.golang.org/grpc/health
+google.golang.org/grpc/health/grpc_health_v1
+google.golang.org/grpc/internal
+google.golang.org/grpc/internal/backoff
+google.golang.org/grpc/internal/balancerload
+google.golang.org/grpc/internal/binarylog
+google.golang.org/grpc/internal/channelz
+google.golang.org/grpc/internal/envconfig
+google.golang.org/grpc/internal/grpcrand
+google.golang.org/grpc/internal/grpcsync
+google.golang.org/grpc/internal/syscall
+google.golang.org/grpc/internal/transport
+google.golang.org/grpc/keepalive
+google.golang.org/grpc/metadata
+google.golang.org/grpc/naming
+google.golang.org/grpc/peer
+google.golang.org/grpc/resolver
+google.golang.org/grpc/resolver/dns
+google.golang.org/grpc/resolver/passthrough
+google.golang.org/grpc/serviceconfig
+google.golang.org/grpc/stats
+google.golang.org/grpc/status
+google.golang.org/grpc/tap
+# gopkg.in/fsnotify.v1 v1.4.7
+gopkg.in/fsnotify.v1
+# gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7
+gopkg.in/tomb.v1
