@@ -3,11 +3,14 @@ package nspawn
 import (
 	"context"
 	"fmt"
+	// "os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/containerd/cgroups"
 	hclog "github.com/hashicorp/go-hclog"
+	// "github.com/hashicorp/nomad/client/lib/fifo"
 	"github.com/hashicorp/nomad/client/stats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/plugins/base"
@@ -103,9 +106,9 @@ type TaskConfig struct {
 // StartTask. This information is needed to rebuild the task state and handler
 // during recovery.
 type TaskState struct {
-	TaskConfig    *drivers.TaskConfig
-	ContainerName string
-	StartedAt     time.Time
+	TaskConfig  *drivers.TaskConfig
+	MachineName string
+	StartedAt   time.Time
 }
 
 // NewNspawnDriver returns a new nspawn driver object
@@ -177,7 +180,49 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 	}
 }
 
-func (d *Driver) RecoverTask(*drivers.TaskHandle) error {
+func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
+	if handle == nil {
+		return fmt.Errorf("error: handle cannot be nil")
+	}
+
+	if _, ok := d.tasks.Get(handle.Config.ID); ok {
+		return nil
+	}
+
+	var taskState TaskState
+	if err := handle.GetDriverState(&taskState); err != nil {
+		return fmt.Errorf("failed to decode task state from handle: %v", err)
+	}
+
+	p, e := DescribeMachine(taskState.TaskConfig.AllocID)
+	if e != nil {
+		d.logger.Error("failed to get machine information", "error", e)
+		return e
+	}
+	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
+	if err != nil {
+		d.logger.Error("failed to get container cgroup", "error", err)
+		return err
+	}
+
+	h := &taskHandle{
+		machine: p,
+		logger:  d.logger,
+
+		totalCpuStats:  stats.NewCpuStats(),
+		userCpuStats:   stats.NewCpuStats(),
+		systemCpuStats: stats.NewCpuStats(),
+
+		cgroup:     control,
+		taskConfig: taskState.TaskConfig,
+		procState:  drivers.TaskStateRunning,
+		startedAt:  taskState.StartedAt,
+	}
+
+	d.tasks.Set(taskState.TaskConfig.ID, h)
+
+	go h.run()
+
 	return nil
 }
 
@@ -195,8 +240,24 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
-	cmd := exec.Command("systemd-nspawn", "-b", "-D", driverConfig.Image, "-n", "-U", "-M", cfg.AllocID, "-x")
+	cmd := exec.Command("systemd-nspawn", "-b", "-D", driverConfig.Image, "-n", "-U", "-M", cfg.AllocID, "-x", "--console", "read-only")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+	// stdout, err := fifo.New(cfg.StdoutPath)
+	// if err != nil {
+	// 	d.logger.Error("failed to open STDOUT path", "error", err)
+	// 	return nil, nil, err
+	// }
+	// stderr, err := fifo.New(cfg.StderrPath)
+	// if err != nil {
+	// 	d.logger.Error("failed to open STDERR path", "error", err)
+	// 	return nil, nil, err
+	// }
+	// cmd.Stderr = stderr
+	// cmd.Stdout = stdout
 	err := cmd.Start()
+	defer cmd.Process.Release()
 	if err != nil {
 		d.logger.Error("failed to start task, error starting container", "error", err)
 		return nil, nil, fmt.Errorf("failed to start task: %v", err)
@@ -211,14 +272,14 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		if e == nil {
 			break
 		} else {
-			d.logger.Info("retrying to get machine information in one second")
+			d.logger.Debug("retrying to get machine information in one second")
 		}
 	}
 	if e != nil {
 		d.logger.Error("failed to get machine information", "error", e)
 		return nil, nil, e
 	}
-	d.logger.Info("gathered information about new machine", "name", p.Name, "leader", p.Leader)
+	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
 
 	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
 	if err != nil {
@@ -241,9 +302,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	driverState := TaskState{
-		ContainerName: p.Name,
-		TaskConfig:    cfg,
-		StartedAt:     h.startedAt,
+		MachineName: p.Name,
+		TaskConfig:  cfg,
+		StartedAt:   h.startedAt,
 	}
 
 	if err := handle.SetDriverState(&driverState); err != nil {
