@@ -2,13 +2,22 @@ package nspawn
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	systemdDbus "github.com/coreos/go-systemd/dbus"
 	"github.com/coreos/go-systemd/machine1"
 	systemdUtil "github.com/coreos/go-systemd/util"
+)
+
+const (
+	// containerMonitorIntv is the interval at which the driver checks if the
+	// container is still alive
+	machineMonitorIntv = 2 * time.Second
 )
 
 type MachineProps struct {
@@ -85,4 +94,21 @@ func systemdVersion() (string, error) {
 	// trim possible version suffix like in "242.19-1"
 	verNum := strings.Split(verNumString, ".")[0]
 	return verNum, nil
+}
+
+// waitTillStopped blocks and returns true when container stops;
+// returns false with an error message if the container processes cannot be identified.
+func waitTillStopped(m *MachineProps) (bool, error) {
+	ps, err := os.FindProcess(int(m.Leader))
+	if err != nil {
+		return false, err
+	}
+
+	for {
+		if err := ps.Signal(syscall.Signal(0)); err != nil {
+			return true, nil
+		}
+
+		time.Sleep(machineMonitorIntv)
+	}
 }

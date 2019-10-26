@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/containerd/cgroups"
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/client/stats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
@@ -219,6 +220,12 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 	d.logger.Info("gathered information about new machine", "name", p.Name, "leader", p.Leader)
 
+	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
+	if err != nil {
+		d.logger.Error("failed to get container cgroup", "error", err)
+		return nil, nil, err
+	}
+
 	h := &taskHandle{
 		machine: p,
 		logger:  d.logger,
@@ -227,6 +234,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		userCpuStats:   stats.NewCpuStats(),
 		systemCpuStats: stats.NewCpuStats(),
 
+		cgroup:     control,
 		taskConfig: cfg,
 		procState:  drivers.TaskStateRunning,
 		startedAt:  time.Unix(int64(p.Timestamp)/1000000, 0),
@@ -245,16 +253,67 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	d.tasks.Set(cfg.ID, h)
 
+	go h.run()
+
 	return handle, nil, nil
 }
 
 func (d *Driver) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {
-	return nil, nil
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return nil, drivers.ErrTaskNotFound
+	}
+
+	ch := make(chan *drivers.ExitResult)
+	go d.handleWait(ctx, handle, ch)
+
+	return ch, nil
 }
+
+func (d *Driver) handleWait(ctx context.Context, handle *taskHandle, ch chan *drivers.ExitResult) {
+	defer close(ch)
+
+	//
+	// Wait for process completion by polling status from handler.
+	// We cannot use the following alternatives:
+	//   * Process.Wait() requires LXC container processes to be children
+	//     of self process; but LXC runs container in separate PID hierarchy
+	//     owned by PID 1.
+	//   * lxc.Container.Wait() holds a write lock on container and prevents
+	//     any other calls, including stats.
+	//
+	// Going with simplest approach of polling for handler to mark exit.
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.ctx.Done():
+			return
+		case <-ticker.C:
+			s := handle.TaskStatus()
+			if s.State == drivers.TaskStateExited {
+				ch <- handle.exitResult
+			}
+		}
+	}
+}
+
 func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) error {
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return drivers.ErrTaskNotFound
+	}
+
+	if err := handle.shutdown(timeout); err != nil {
+		return fmt.Errorf("executor shutdown failed: %v", err)
+	}
 
 	return nil
 }
+
 func (d *Driver) DestroyTask(taskID string, force bool) error {
 	return nil
 }
@@ -310,5 +369,10 @@ func (d *Driver) SetConfig(cfg *base.Config) error {
 		d.nomadConfig = cfg.AgentConfig.Driver
 	}
 
+	return nil
+}
+
+func (d *Driver) Shutdown(ctx context.Context) error {
+	d.signalShutdown()
 	return nil
 }

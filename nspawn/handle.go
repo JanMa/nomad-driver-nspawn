@@ -2,6 +2,8 @@ package nspawn
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
 	"strconv"
 	"sync"
 	"time"
@@ -29,6 +31,7 @@ type taskHandle struct {
 	// stateLock syncs access to all fields below
 	stateLock sync.RWMutex
 
+	cgroup      cgroups.Cgroup
 	taskConfig  *drivers.TaskConfig
 	procState   drivers.TaskState
 	startedAt   time.Time
@@ -59,6 +62,30 @@ func (h *taskHandle) IsRunning() bool {
 	return h.procState == drivers.TaskStateRunning
 }
 
+func (h *taskHandle) run() {
+	h.stateLock.Lock()
+	if h.exitResult == nil {
+		h.exitResult = &drivers.ExitResult{}
+	}
+	h.stateLock.Unlock()
+
+	if ok, err := waitTillStopped(h.machine); !ok {
+		h.logger.Error("failed to find container process", "error", err)
+		return
+	}
+
+	h.stateLock.Lock()
+	defer h.stateLock.Unlock()
+
+	h.procState = drivers.TaskStateExited
+	h.exitResult.ExitCode = 0
+	h.exitResult.Signal = 0
+	h.completedAt = time.Now()
+	h.logger.Debug("run() exited successful")
+
+	// TODO: detect if the task OOMed
+}
+
 func (h *taskHandle) stats(ctx context.Context, interval time.Duration) (<-chan *drivers.TaskResourceUsage, error) {
 	ch := make(chan *drivers.TaskResourceUsage)
 	go h.handleStats(ctx, ch, interval)
@@ -67,9 +94,14 @@ func (h *taskHandle) stats(ctx context.Context, interval time.Duration) (<-chan 
 
 func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResourceUsage, interval time.Duration) {
 	defer close(ch)
+	h.logger.Debug("handleStats called", "machine", h.machine.Name)
 	timer := time.NewTimer(0)
 	for {
 		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
 		case <-ctx.Done():
 			return
 
@@ -77,18 +109,21 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 			timer.Reset(interval)
 		}
 
-		control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", h.machine.Unit))
-		if err != nil {
-			h.logger.Error("failed to get container cgroup", "error", err)
+		h.stateLock.RLock()
+		state := h.cgroup.State()
+		h.stateLock.RUnlock()
+		if state == cgroups.Deleted {
 			return
 		}
-		stat, err := control.Stat()
+
+		h.stateLock.RLock()
+		t := time.Now()
+		stat, err := h.cgroup.Stat()
+		h.stateLock.RUnlock()
 		if err != nil {
 			h.logger.Error("failed to get container cgroup stats", "error", err)
 			return
 		}
-
-		t := time.Now()
 
 		// Get the cpu stats
 		system := stat.CPU.Usage.Kernel
@@ -147,4 +182,15 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 		case ch <- &taskResUsage:
 		}
 	}
+}
+
+func (h *taskHandle) shutdown(timeout time.Duration) error {
+	cmd := exec.Command("machinectl", "stop", h.machine.Name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		h.logger.Error(fmt.Sprintf("error shutting down", "error", string(out), "machine", h.machine.Name))
+		return err
+	}
+	h.logger.Info("shutdown successful", "machine", h.machine.Name)
+	return nil
 }
