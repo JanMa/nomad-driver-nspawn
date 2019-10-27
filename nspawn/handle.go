@@ -94,7 +94,6 @@ func (h *taskHandle) stats(ctx context.Context, interval time.Duration) (<-chan 
 
 func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResourceUsage, interval time.Duration) {
 	defer close(ch)
-	h.logger.Debug("handleStats called", "machine", h.machine.Name)
 	timer := time.NewTimer(0)
 	for {
 		select {
@@ -129,13 +128,18 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 		system := stat.CPU.Usage.Kernel
 		user := stat.CPU.Usage.User
 		total := stat.CPU.Usage.Total
+		totalPercent := h.totalCpuStats.Percent(float64(total))
 		cs := &drivers.CpuStats{
 			SystemMode: h.systemCpuStats.Percent(float64(system)),
-			UserMode:   h.systemCpuStats.Percent(float64(user)),
-			Percent:    h.totalCpuStats.Percent(float64(total)),
-			TotalTicks: float64(total),
+			UserMode:   h.userCpuStats.Percent(float64(user)),
+			Percent:    totalPercent,
+			TotalTicks: h.totalCpuStats.TicksConsumed(totalPercent),
 			Measured:   NspawnMeasuredCpuStats,
 		}
+		h.logger.Debug("systemCpuStats", "percent", cs.SystemMode)
+		h.logger.Debug("userCpuStats", "percent", cs.UserMode)
+		h.logger.Debug("totalCpuStats", "percent", cs.Percent)
+		h.logger.Debug("total", "percent", cs.TotalTicks)
 
 		// Get the Memory Stats
 		memory := stat.Memory
@@ -145,8 +149,12 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 			Cache: memory.Cache,
 		}
 
+		h.logger.Debug("memory", "rss", ms.RSS)
+		h.logger.Debug("memory", "cache", ms.Cache)
+
 		if memory.Swap != nil {
 			ms.Swap = memory.Swap.Usage
+			h.logger.Debug("memory", "swap", ms.Swap)
 			measured = append(measured, "Swap")
 		} else {
 			h.logger.Error("failed to get swap usage", "error", err)
@@ -154,7 +162,10 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 
 		if memory.Usage != nil {
 			ms.Usage = memory.Usage.Usage
-			measured = append(measured, "Max Usage")
+			h.logger.Debug("memory", "usage", ms.Usage)
+			ms.MaxUsage = memory.Usage.Max
+			h.logger.Debug("memory", "max-usage", ms.Usage)
+			measured = append(measured, "Usage", "Max Usage")
 		} else {
 			h.logger.Error("failed to get max memory usage", "error", err)
 		}
@@ -162,6 +173,8 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 		if memory.Kernel != nil {
 			ms.KernelUsage = memory.Kernel.Usage
 			ms.KernelMaxUsage = memory.Kernel.Max
+			h.logger.Debug("memory", "kernel-usage", ms.KernelUsage)
+			h.logger.Debug("memory", "kernel-max", ms.KernelMaxUsage)
 			measured = append(measured, "Kernel Usage", "Kernel Max Usage")
 		} else {
 			h.logger.Error("failed to get kernel memory usage", "error", err)
