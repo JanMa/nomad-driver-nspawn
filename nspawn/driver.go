@@ -3,13 +3,14 @@ package nspawn
 import (
 	"context"
 	"fmt"
-	// "os"
+	"io"
 	"os/exec"
 	"syscall"
 	"time"
 
 	"github.com/containerd/cgroups"
 	hclog "github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/nomad/client/lib/fifo"
 	"github.com/hashicorp/nomad/client/stats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/plugins/base"
@@ -243,18 +244,33 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
-	// stdout, err := fifo.New(cfg.StdoutPath)
-	// if err != nil {
-	// 	d.logger.Error("failed to open STDOUT path", "error", err)
-	// 	return nil, nil, err
-	// }
-	// stderr, err := fifo.New(cfg.StderrPath)
-	// if err != nil {
-	// 	d.logger.Error("failed to open STDERR path", "error", err)
-	// 	return nil, nil, err
-	// }
-	// cmd.Stderr = stderr
-	// cmd.Stdout = stdout
+	var stdout io.WriteCloser
+	var stderr io.WriteCloser
+
+	if cfg.StdoutPath != "" {
+		f, err := fifo.OpenWriter(cfg.StdoutPath)
+		if err != nil {
+			d.logger.Error("failed to create stdout", "error", err)
+		}
+		stdout = f
+	}
+
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+
+	if cfg.StderrPath != "" {
+		f, err := fifo.OpenWriter(cfg.StderrPath)
+		if err != nil {
+			d.logger.Error("failed to create stderr", "error", err)
+		}
+		stderr = f
+	}
+
+	if stderr != nil {
+		cmd.Stderr = stderr
+	}
+
 	err := cmd.Start()
 	defer cmd.Process.Release()
 	if err != nil {
