@@ -36,7 +36,6 @@ require (
 )
 
 replace (
-	github.com/hashicorp/go-msgpack/codec v0.5.5 => github.com/ugorji/go/codec v1.1.7
+	github.com/hashicorp/nomad v0.10.0 => github.com/JanMa/nomad v0.10.0-patched
 	github.com/shirou/gopsutil v2.19.9+incompatible => github.com/hashicorp/gopsutil v2.17.13-0.20190117153606-62d5761ddb7d+incompatible
-	github.com/ugorji/go v1.1.7 => github.com/hashicorp/go-msgpack v0.0.0-20190927123313-23165f7bc3c2
 )

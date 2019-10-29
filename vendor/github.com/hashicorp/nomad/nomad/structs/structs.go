@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/gorhill/cronexpr"
-	hcodec "github.com/ugorji/go/codec"
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/nomad/acl"
@@ -35,6 +34,7 @@ import (
 	psstructs "github.com/hashicorp/nomad/plugins/shared/structs"
 	"github.com/mitchellh/copystructure"
 	"github.com/ugorji/go/codec"
+	hcodec "github.com/ugorji/go/codec"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -5549,6 +5549,14 @@ func (t *Task) Validate(ephemeralDisk *EphemeralDisk, jobType string, tgServices
 			mErr.Errors = append(mErr.Errors, serviceErr)
 		}
 	}
+
+	// Validation for volumes
+	for idx, vm := range t.VolumeMounts {
+		if !MountPropagationModeIsValid(vm.PropagationMode) {
+			mErr.Errors = append(mErr.Errors, fmt.Errorf("Volume Mount (%d) has an invalid propagation mode: \"%s\"", idx, vm.PropagationMode))
+		}
+	}
+
 	return mErr.ErrorOrNil()
 }
 

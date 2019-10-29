@@ -70,7 +70,7 @@ github.com/hashicorp/hcl/hcl/token
 github.com/hashicorp/hcl/json/parser
 github.com/hashicorp/hcl/json/scanner
 github.com/hashicorp/hcl/json/token
-# github.com/hashicorp/nomad v0.10.0
+# github.com/hashicorp/nomad v0.10.0 => github.com/JanMa/nomad v0.10.0-patched
 github.com/hashicorp/nomad/acl
 github.com/hashicorp/nomad/client/allocdir
 github.com/hashicorp/nomad/client/lib/fifo
@@ -134,7 +134,7 @@ github.com/shirou/gopsutil/net
 github.com/shirou/gopsutil/process
 # github.com/shirou/w32 v0.0.0-20160930032740-bb4de0191aa4
 github.com/shirou/w32
-# github.com/ugorji/go v1.1.7 => github.com/hashicorp/go-msgpack v0.0.0-20190927123313-23165f7bc3c2
+# github.com/ugorji/go/codec v1.1.7
 github.com/ugorji/go/codec
 # github.com/vmihailenco/msgpack v3.3.3+incompatible
 github.com/vmihailenco/msgpack
