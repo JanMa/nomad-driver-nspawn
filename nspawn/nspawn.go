@@ -2,6 +2,7 @@ package nspawn
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -12,12 +13,13 @@ import (
 	systemdDbus "github.com/coreos/go-systemd/dbus"
 	"github.com/coreos/go-systemd/machine1"
 	systemdUtil "github.com/coreos/go-systemd/util"
+	"github.com/godbus/dbus"
 )
 
 const (
-	// containerMonitorIntv is the interval at which the driver checks if the
-	// container is still alive
 	machineMonitorIntv = 2 * time.Second
+	dbusInterface      = "org.freedesktop.machine1.Manager"
+	dbusPath           = "/org/freedesktop/machine1"
 )
 
 type MachineProps struct {
@@ -32,6 +34,13 @@ type MachineProps struct {
 	Service            string
 	State              string
 	Unit               string
+}
+
+type MachineAddrs struct {
+	IPv4         net.IP
+	LocalUnicast net.IP
+	//TODO: add parsing for IPv6
+	// IPv6         net.IP
 }
 
 func DescribeMachine(name string) (*MachineProps, error) {
@@ -56,6 +65,39 @@ func DescribeMachine(name string) (*MachineProps, error) {
 		State:              p["State"].(string),
 		Unit:               p["Unit"].(string),
 	}, nil
+}
+
+func MachineAddresses(name string) (*MachineAddrs, error) {
+	dbusConn, err := setupPrivateSystemBus()
+	if err != nil {
+		return nil, err
+	}
+
+	obj := dbusConn.Object("org.freedesktop.machine1", dbus.ObjectPath(dbusPath))
+
+	result := obj.Call(fmt.Sprintf("%s.%s", dbusInterface, "GetMachineAddresses"), 0, name)
+	if result.Err != nil {
+		return nil, result.Err
+	}
+
+	addrs := MachineAddrs{}
+
+	for _, v := range result.Body[0].([][]interface{}) {
+		t := v[0].(int32)
+		a := v[1].([]uint8)
+		if t == 2 {
+			ip := net.IP{}
+			for _, o := range a {
+				ip = append(ip, byte(o))
+			}
+			if ip.IsLinkLocalUnicast() {
+				addrs.LocalUnicast = ip
+			} else {
+				addrs.IPv4 = ip
+			}
+		}
+	}
+	return &addrs, nil
 }
 
 func isInstalled() error {
@@ -111,4 +153,22 @@ func waitTillStopped(m *MachineProps) (bool, error) {
 
 		time.Sleep(machineMonitorIntv)
 	}
+}
+
+func setupPrivateSystemBus() (conn *dbus.Conn, err error) {
+	conn, err = dbus.SystemBusPrivate()
+	if err != nil {
+		return nil, err
+	}
+	methods := []dbus.Auth{dbus.AuthExternal(strconv.Itoa(os.Getuid()))}
+	if err = conn.Auth(methods); err != nil {
+		conn.Close()
+		conn = nil
+		return
+	}
+	if err = conn.Hello(); err != nil {
+		conn.Close()
+		conn = nil
+	}
+	return conn, nil
 }
