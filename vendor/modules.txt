@@ -5,6 +5,10 @@ github.com/Microsoft/go-winio
 github.com/Microsoft/go-winio/pkg/guid
 # github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d
 github.com/StackExchange/wmi
+# github.com/agext/levenshtein v1.2.1
+github.com/agext/levenshtein
+# github.com/apparentlymart/go-textseg v1.0.0
+github.com/apparentlymart/go-textseg/textseg
 # github.com/armon/go-metrics v0.0.0-20190430140413-ec5e00d3c878
 github.com/armon/go-metrics
 # github.com/containerd/cgroups v0.0.0-20191011165608-5fbad35c2a7e
@@ -16,6 +20,8 @@ github.com/coreos/go-systemd/machine1
 github.com/coreos/go-systemd/util
 # github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
 github.com/coreos/pkg/dlopen
+# github.com/davecgh/go-spew v1.1.1
+github.com/davecgh/go-spew/spew
 # github.com/docker/go-units v0.4.0
 github.com/docker/go-units
 # github.com/go-ole/go-ole v1.2.4
@@ -70,6 +76,11 @@ github.com/hashicorp/hcl/hcl/token
 github.com/hashicorp/hcl/json/parser
 github.com/hashicorp/hcl/json/scanner
 github.com/hashicorp/hcl/json/token
+# github.com/hashicorp/hcl2 v0.0.0-20191002203319-fb75b3253c80
+github.com/hashicorp/hcl2/hcl
+github.com/hashicorp/hcl2/hcl/hclsyntax
+github.com/hashicorp/hcl2/hcl/json
+github.com/hashicorp/hcl2/hcldec
 # github.com/hashicorp/nomad v0.10.0 => github.com/JanMa/nomad v0.10.0-patched
 github.com/hashicorp/nomad/acl
 github.com/hashicorp/nomad/client/allocdir
@@ -81,6 +92,8 @@ github.com/hashicorp/nomad/helper
 github.com/hashicorp/nomad/helper/args
 github.com/hashicorp/nomad/helper/flatmap
 github.com/hashicorp/nomad/helper/pluginutils/grpcutils
+github.com/hashicorp/nomad/helper/pluginutils/hclspecutils
+github.com/hashicorp/nomad/helper/pluginutils/hclutils
 github.com/hashicorp/nomad/helper/stats
 github.com/hashicorp/nomad/helper/uuid
 github.com/hashicorp/nomad/lib/kheap
@@ -112,8 +125,12 @@ github.com/mitchellh/copystructure
 github.com/mitchellh/go-homedir
 # github.com/mitchellh/go-testing-interface v1.0.0
 github.com/mitchellh/go-testing-interface
+# github.com/mitchellh/go-wordwrap v1.0.0
+github.com/mitchellh/go-wordwrap
 # github.com/mitchellh/hashstructure v1.0.0
 github.com/mitchellh/hashstructure
+# github.com/mitchellh/mapstructure v1.1.2
+github.com/mitchellh/mapstructure
 # github.com/mitchellh/reflectwalk v1.0.0
 github.com/mitchellh/reflectwalk
 # github.com/oklog/run v1.0.0
@@ -122,6 +139,8 @@ github.com/oklog/run
 github.com/opencontainers/runtime-spec/specs-go
 # github.com/pkg/errors v0.8.1
 github.com/pkg/errors
+# github.com/pmezard/go-difflib v1.0.0
+github.com/pmezard/go-difflib/difflib
 # github.com/ryanuber/go-glob v1.0.0
 github.com/ryanuber/go-glob
 # github.com/shirou/gopsutil v2.19.9+incompatible => github.com/hashicorp/gopsutil v2.17.13-0.20190117153606-62d5761ddb7d+incompatible
@@ -134,6 +153,9 @@ github.com/shirou/gopsutil/net
 github.com/shirou/gopsutil/process
 # github.com/shirou/w32 v0.0.0-20160930032740-bb4de0191aa4
 github.com/shirou/w32
+# github.com/stretchr/testify v1.3.0
+github.com/stretchr/testify/assert
+github.com/stretchr/testify/require
 # github.com/ugorji/go/codec v1.1.7
 github.com/ugorji/go/codec
 # github.com/vmihailenco/msgpack v3.3.3+incompatible
@@ -142,6 +164,10 @@ github.com/vmihailenco/msgpack/codes
 # github.com/zclconf/go-cty v1.1.0
 github.com/zclconf/go-cty/cty
 github.com/zclconf/go-cty/cty/convert
+github.com/zclconf/go-cty/cty/function
+github.com/zclconf/go-cty/cty/function/stdlib
+github.com/zclconf/go-cty/cty/gocty
+github.com/zclconf/go-cty/cty/json
 github.com/zclconf/go-cty/cty/msgpack
 github.com/zclconf/go-cty/cty/set
 # golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550
@@ -158,7 +184,7 @@ golang.org/x/net/trace
 golang.org/x/sys/cpu
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/text v0.3.1-0.20181227161524-e6919f6577db
+# golang.org/x/text v0.3.2
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
