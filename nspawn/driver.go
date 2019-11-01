@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -240,7 +241,18 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
-	cmd := exec.Command("systemd-nspawn", "-b", "-D", driverConfig.Image, "-n", "-U", "-M", cfg.AllocID, "-x", "--console", "read-only")
+	// check if image exists
+	imageStat, err := os.Stat(driverConfig.Image)
+	if err != nil {
+		d.logger.Error("Error acessing image", "error", err)
+		return nil, nil, err
+	}
+	imageType := "-i"
+	if imageStat.IsDir() {
+		imageType = "-D"
+	}
+
+	cmd := exec.Command("systemd-nspawn", "-b", imageType, driverConfig.Image, "-n", "-U", "-M", cfg.AllocID, "-x", "--console", "read-only")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
@@ -271,7 +283,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		cmd.Stderr = stderr
 	}
 
-	err := cmd.Start()
+	err = cmd.Start()
 	defer cmd.Process.Release()
 	if err != nil {
 		d.logger.Error("failed to start task, error starting container", "error", err)

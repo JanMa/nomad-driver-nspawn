@@ -5,7 +5,7 @@ containers with `systemd-nspawn`. **It is currently in active development and
 not ready to be used yet!**
 
 ## TODO
-- [ ] Support for images
+- [x] Support for images
 - [ ] Port forwarding
 - [ ] IPTables rules
 - [ ] Improve task config
