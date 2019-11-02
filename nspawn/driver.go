@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/nomad/client/lib/fifo"
 	"github.com/hashicorp/nomad/client/stats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
+	"github.com/hashicorp/nomad/helper/pluginutils/hclutils"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	driversUtil "github.com/hashicorp/nomad/plugins/drivers/utils"
@@ -31,6 +32,10 @@ const (
 	// taskHandleVersion is the version of task handle which this driver sets
 	// and understands how to decode driver state
 	taskHandleVersion = 1
+
+	// startup timeouts
+	machinePropertiesTimeout = 30 * time.Second
+	machineAddressTimeout    = 30 * time.Second
 )
 
 var (
@@ -53,7 +58,8 @@ var (
 	// taskConfigSpec is the hcl specification for the driver config section of
 	// a task within a job. It is returned in the TaskConfigSchema RPC
 	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		"image": hclspec.NewAttr("image", "string", true),
+		"image":    hclspec.NewAttr("image", "string", true),
+		"port_map": hclspec.NewAttr("port_map", "list(map(number))", false),
 	})
 
 	// capabilities is returned by the Capabilities RPC and indicates what
@@ -100,7 +106,8 @@ type Config struct {
 
 // TaskConfig is the driver configuration of a task within a job
 type TaskConfig struct {
-	Image string `codec:"image"`
+	Image   string             `codec:"image"`
+	PortMap hclutils.MapStrInt `codec:"port_map"`
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -195,7 +202,7 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
-	p, e := DescribeMachine(taskState.TaskConfig.AllocID)
+	p, e := DescribeMachine(taskState.TaskConfig.AllocID, machinePropertiesTimeout)
 	if e != nil {
 		d.logger.Error("failed to get machine information", "error", e)
 		return e
@@ -252,7 +259,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		imageType = "-D"
 	}
 
-	cmd := exec.Command("systemd-nspawn", "-b", imageType, driverConfig.Image, "-n", "-U", "-M", cfg.AllocID, "-x", "--console", "read-only")
+	cmd := exec.Command("systemd-nspawn", "-b", imageType, driverConfig.Image, "-n", "-U", "-M", cfg.AllocID, "--console", "read-only")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
@@ -283,6 +290,48 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		cmd.Stderr = stderr
 	}
 
+	// Setup port mapping and exposed ports
+	if len(cfg.Resources.NomadResources.Networks) == 0 {
+		d.logger.Debug("no network interfaces are available")
+		if len(driverConfig.PortMap) > 0 {
+			d.logger.Error("Trying to map ports but no network interface is available")
+		}
+	} else {
+		network := cfg.Resources.NomadResources.Networks[0]
+		for _, port := range network.ReservedPorts {
+			// By default we will map the allocated port 1:1 to the container
+			machinePort := port.Value
+
+			// If the user has mapped a port using port_map we'll change it here
+			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
+				machinePort = mapped
+			}
+
+			hostPort := port.Value
+			cmd.Args = append(cmd.Args, "-p", fmt.Sprintf("%d:%d", hostPort, machinePort))
+
+			d.logger.Debug("allocated static port", "ip", network.IP, "port", hostPort)
+			d.logger.Debug("exposed port", "port", machinePort)
+		}
+
+		for _, port := range network.DynamicPorts {
+			// By default we will map the allocated port 1:1 to the container
+			machinePort := port.Value
+
+			// If the user has mapped a port using port_map we'll change it here
+			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
+				machinePort = mapped
+			}
+
+			hostPort := port.Value
+			cmd.Args = append(cmd.Args, "-p", fmt.Sprintf("%d:%d", hostPort, machinePort))
+
+			d.logger.Debug("allocated mapped port", "ip", network.IP, "port", hostPort)
+			d.logger.Debug("exposed port", "port", machinePort)
+		}
+
+	}
+
 	err = cmd.Start()
 	defer cmd.Process.Release()
 	if err != nil {
@@ -291,22 +340,24 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	// wait for boot
-	var p *MachineProps
-	var e error
-	for {
-		time.Sleep(1 * time.Second)
-		p, e = DescribeMachine(cfg.AllocID)
-		if e == nil {
-			break
-		} else {
-			d.logger.Debug("retrying to get machine information in one second")
-		}
-	}
+	p, e := DescribeMachine(cfg.AllocID, machinePropertiesTimeout)
 	if e != nil {
 		d.logger.Error("failed to get machine information", "error", e)
 		return nil, nil, e
 	}
 	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
+
+	addr, err := MachineAddresses(cfg.AllocID, machineAddressTimeout)
+	if err != nil {
+		d.logger.Error("failed to get machine addresses", "error", e)
+	}
+
+	d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
+	network := &drivers.DriverNetwork{
+		PortMap:       driverConfig.PortMap,
+		IP:            addr.IPv4.String(),
+		AutoAdvertise: false,
+	}
 
 	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
 	if err != nil {
@@ -343,7 +394,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	go h.run()
 
-	return handle, nil, nil
+	return handle, network, nil
 }
 
 func (d *Driver) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {

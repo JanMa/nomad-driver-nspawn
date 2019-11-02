@@ -43,61 +43,97 @@ type MachineAddrs struct {
 	// IPv6         net.IP
 }
 
-func DescribeMachine(name string) (*MachineProps, error) {
+func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) {
 	c, e := machine1.New()
 	if e != nil {
 		return nil, e
 	}
-	p, e := c.DescribeMachine(name)
-	if e != nil {
-		return nil, e
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	done := make(chan bool)
+	go func() {
+		time.Sleep(timeout)
+		done <- true
+	}()
+
+	for {
+		select {
+		case <-done:
+			ticker.Stop()
+			return nil, fmt.Errorf("timed out while getting machine properties")
+		case <-ticker.C:
+			p, e := c.DescribeMachine(name)
+			if e == nil {
+				ticker.Stop()
+				return &MachineProps{
+					Name:               p["Name"].(string),
+					TimestampMonotonic: p["TimestampMonotonic"].(uint64),
+					Timestamp:          p["Timestamp"].(uint64),
+					NetworkInterfaces:  p["NetworkInterfaces"].([]int32),
+					ID:                 p["Id"].([]uint8),
+					Class:              p["Class"].(string),
+					Leader:             p["Leader"].(uint32),
+					RootDirectory:      p["RootDirectory"].(string),
+					Service:            p["Service"].(string),
+					State:              p["State"].(string),
+					Unit:               p["Unit"].(string),
+				}, nil
+			}
+		}
 	}
-	return &MachineProps{
-		Name:               p["Name"].(string),
-		TimestampMonotonic: p["TimestampMonotonic"].(uint64),
-		Timestamp:          p["Timestamp"].(uint64),
-		NetworkInterfaces:  p["NetworkInterfaces"].([]int32),
-		ID:                 p["Id"].([]uint8),
-		Class:              p["Class"].(string),
-		Leader:             p["Leader"].(uint32),
-		RootDirectory:      p["RootDirectory"].(string),
-		Service:            p["Service"].(string),
-		State:              p["State"].(string),
-		Unit:               p["Unit"].(string),
-	}, nil
 }
 
-func MachineAddresses(name string) (*MachineAddrs, error) {
+func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error) {
 	dbusConn, err := setupPrivateSystemBus()
 	if err != nil {
 		return nil, err
 	}
+	defer dbusConn.Close()
 
 	obj := dbusConn.Object("org.freedesktop.machine1", dbus.ObjectPath(dbusPath))
+	ticker := time.NewTicker(500 * time.Millisecond)
+	done := make(chan bool)
+	go func() {
+		time.Sleep(timeout)
+		done <- true
+	}()
 
-	result := obj.Call(fmt.Sprintf("%s.%s", dbusInterface, "GetMachineAddresses"), 0, name)
-	if result.Err != nil {
-		return nil, result.Err
-	}
-
-	addrs := MachineAddrs{}
-
-	for _, v := range result.Body[0].([][]interface{}) {
-		t := v[0].(int32)
-		a := v[1].([]uint8)
-		if t == 2 {
-			ip := net.IP{}
-			for _, o := range a {
-				ip = append(ip, byte(o))
+	for {
+		select {
+		case <-done:
+			ticker.Stop()
+			return nil, fmt.Errorf("timed out while getting machine addresses")
+		case <-ticker.C:
+			result := obj.Call(fmt.Sprintf("%s.%s", dbusInterface, "GetMachineAddresses"), 0, name)
+			if result.Err != nil {
+				return nil, result.Err
 			}
-			if ip.IsLinkLocalUnicast() {
-				addrs.LocalUnicast = ip
-			} else {
-				addrs.IPv4 = ip
+
+			addrs := MachineAddrs{}
+
+			for _, v := range result.Body[0].([][]interface{}) {
+				t := v[0].(int32)
+				a := v[1].([]uint8)
+				if t == 2 {
+					ip := net.IP{}
+					for _, o := range a {
+						ip = append(ip, byte(o))
+					}
+					if ip.IsLinkLocalUnicast() {
+						addrs.LocalUnicast = ip
+					} else {
+						addrs.IPv4 = ip
+					}
+				}
+			}
+
+			if len(addrs.IPv4) > 0 && len(addrs.LocalUnicast) > 0 {
+				ticker.Stop()
+				return &addrs, nil
 			}
 		}
 	}
-	return &addrs, nil
+
 }
 
 func isInstalled() error {
