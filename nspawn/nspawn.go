@@ -10,10 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-iptables/iptables"
 	systemdDbus "github.com/coreos/go-systemd/dbus"
 	"github.com/coreos/go-systemd/machine1"
 	systemdUtil "github.com/coreos/go-systemd/util"
 	"github.com/godbus/dbus"
+	"github.com/ugorji/go/codec"
 )
 
 const (
@@ -81,6 +83,42 @@ func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) 
 			}
 		}
 	}
+}
+
+func (p *MachineProps) ConfigureIPTablesRules(delete bool) error {
+	t, e := iptables.New()
+	if e != nil {
+		return e
+	}
+
+	iFace, e := net.InterfaceByIndex(int(p.NetworkInterfaces[0]))
+	if e != nil {
+		return e
+	}
+
+	rules := [][]string{[]string{"-o", iFace.Name, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+		[]string{"-i", iFace.Name, "!", "-o", iFace.Name, "-j", "ACCEPT"},
+		[]string{"-i", iFace.Name, "-o", iFace.Name, "-j", "ACCEPT"},
+	}
+
+	for _, r := range rules {
+		switch ok, err := t.Exists("filter", "FORWARD", r...); {
+		case err == nil && !ok:
+			e := t.Append("filter", "FORWARD", r...)
+			if e != nil {
+				return e
+			}
+		case err == nil && ok && delete:
+			e := t.Delete("filter", "FORWARD", r...)
+			if e != nil {
+				return e
+			}
+		case err != nil:
+			return err
+		}
+	}
+
+	return nil
 }
 
 func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error) {
@@ -207,4 +245,24 @@ func setupPrivateSystemBus() (conn *dbus.Conn, err error) {
 		conn = nil
 	}
 	return conn, nil
+}
+
+type MapStrInt map[string]int
+
+func (s *MapStrInt) CodecEncodeSelf(enc *codec.Encoder) {
+	v := []map[string]int{*s}
+	enc.MustEncode(v)
+}
+
+func (s *MapStrInt) CodecDecodeSelf(dec *codec.Decoder) {
+	ms := []map[string]int{}
+	dec.MustDecode(&ms)
+
+	r := map[string]int{}
+	for _, m := range ms {
+		for k, v := range m {
+			r[k] = v
+		}
+	}
+	*s = r
 }

@@ -7,7 +7,7 @@ not ready to be used yet!**
 ## TODO
 - [x] Support for images
 - [x] Port forwarding
-- [ ] IPTables rules
+- [x] IPTables rules
 - [ ] Improve task config
 - [ ] download images
 - [ ] support network modes

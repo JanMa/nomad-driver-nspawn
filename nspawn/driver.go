@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/nomad/client/lib/fifo"
 	"github.com/hashicorp/nomad/client/stats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
-	"github.com/hashicorp/nomad/helper/pluginutils/hclutils"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	driversUtil "github.com/hashicorp/nomad/plugins/drivers/utils"
@@ -106,8 +105,8 @@ type Config struct {
 
 // TaskConfig is the driver configuration of a task within a job
 type TaskConfig struct {
-	Image   string             `codec:"image"`
-	PortMap hclutils.MapStrInt `codec:"port_map"`
+	Image   string    `codec:"image"`
+	PortMap MapStrInt `codec:"port_map"`
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -365,6 +364,11 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, err
 	}
 
+	err = p.ConfigureIPTablesRules(false)
+	if err != nil {
+		d.logger.Error("Failed to set up IPTables rules", "error", err)
+	}
+
 	h := &taskHandle{
 		machine: p,
 		logger:  d.logger,
@@ -448,6 +452,11 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 
 	if err := handle.shutdown(timeout); err != nil {
 		return fmt.Errorf("executor shutdown failed: %v", err)
+	}
+
+	err := handle.machine.ConfigureIPTablesRules(true)
+	if err != nil {
+		d.logger.Error("Failed to remove IPTables rules", "error", err)
 	}
 
 	return nil
