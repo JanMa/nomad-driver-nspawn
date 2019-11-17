@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -57,8 +56,36 @@ var (
 	// taskConfigSpec is the hcl specification for the driver config section of
 	// a task within a job. It is returned in the TaskConfigSchema RPC
 	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		"image":    hclspec.NewAttr("image", "string", true),
 		"port_map": hclspec.NewAttr("port_map", "list(map(number))", false),
+		"machine_config": hclspec.NewBlock("machine_config", true, hclspec.NewObject(map[string]*hclspec.Spec{
+			"boot": hclspec.NewDefault(
+				hclspec.NewAttr("boot", "bool", false),
+				hclspec.NewLiteral("true"),
+			),
+			"ephemeral": hclspec.NewAttr("ephemeral", "bool", false),
+			"network_veth": hclspec.NewDefault(
+				hclspec.NewAttr("network_veth", "bool", false),
+				hclspec.NewLiteral("true"),
+			),
+			"process_two": hclspec.NewAttr("process_two", "bool", false),
+			"read_only":   hclspec.NewAttr("read_only", "bool", false),
+			"user_namespacing": hclspec.NewDefault(
+				hclspec.NewAttr("user_namespacing", "bool", false),
+				hclspec.NewLiteral("true"),
+			),
+			"command": hclspec.NewAttr("command", "string", false),
+			"console": hclspec.NewAttr("console", "string", false),
+			"image":   hclspec.NewAttr("image", "string", true),
+			// "machine":           hclspec.NewAttr("machine", "string", false),
+			"pivot_root":        hclspec.NewAttr("pivot_root", "string", false),
+			"resolv_conf":       hclspec.NewAttr("resolv_conf", "string", false),
+			"user":              hclspec.NewAttr("user", "string", false),
+			"volatile":          hclspec.NewAttr("volatile", "string", false),
+			"working_directory": hclspec.NewAttr("working_directory", "string", false),
+			"bind":              hclspec.NewAttr("bind", "list(map(string))", false),
+			"bind_read_only":    hclspec.NewAttr("bind_read_only", "list(map(string))", false),
+			"environment":       hclspec.NewAttr("environment", "list(map(string))", false),
+		})),
 	})
 
 	// capabilities is returned by the Capabilities RPC and indicates what
@@ -105,8 +132,8 @@ type Config struct {
 
 // TaskConfig is the driver configuration of a task within a job
 type TaskConfig struct {
-	Image   string    `codec:"image"`
-	PortMap MapStrInt `codec:"port_map"`
+	PortMap MapStrInt     `codec:"port_map"`
+	Config  MachineConfig `codec:"machine_config"`
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -247,18 +274,17 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
-	// check if image exists
-	imageStat, err := os.Stat(driverConfig.Image)
+	driverConfig.Config.Machine = cfg.AllocID
+
+	args, err := driverConfig.Config.ConfigArray()
 	if err != nil {
-		d.logger.Error("Error acessing image", "error", err)
+		d.logger.Error("Error generating machine config", "error", err)
 		return nil, nil, err
 	}
-	imageType := "-i"
-	if imageStat.IsDir() {
-		imageType = "-D"
-	}
 
-	cmd := exec.Command("systemd-nspawn", "-b", imageType, driverConfig.Image, "-n", "-U", "-M", cfg.AllocID, "--console", "read-only")
+	d.logger.Info("commad arguments", "args", args)
+
+	cmd := exec.Command("systemd-nspawn", args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}

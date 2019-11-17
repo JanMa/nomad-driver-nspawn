@@ -45,6 +45,96 @@ type MachineAddrs struct {
 	// IPv6         net.IP
 }
 
+type MachineConfig struct {
+	Boot             bool      `codec:"boot"`
+	Ephemeral        bool      `codec:"ephemeral"`
+	NetworkVeth      bool      `codec:"network_veth"`
+	ProcessTwo       bool      `codec:"process_two"`
+	ReadOnly         bool      `codec:"read_only"`
+	UserNamespacing  bool      `codec:"user_namespacing"`
+	Command          string    `codec:"command"`
+	Console          string    `codec:"console"`
+	Image            string    `codec:"image"`
+	Machine          string    `codec:"machine"`
+	PivotRoot        string    `codec:"pivot_root"`
+	ResolvConf       string    `codec:"resolv_conf"`
+	User             string    `codec:"user"`
+	Volatile         string    `codec:"volatile"`
+	WorkingDirectory string    `codec:"working_directory"`
+	Bind             MapStrStr `codec:"bind"`
+	BindReadOnly     MapStrStr `codec:"bind_read_only"`
+	Environment      MapStrStr `codec:"environment"`
+}
+
+func (c *MachineConfig) ConfigArray() ([]string, error) {
+	if c.Image == "" {
+		return nil, fmt.Errorf("no image configured")
+	}
+	// check if image exists
+	imageStat, err := os.Stat(c.Image)
+	if err != nil {
+		return nil, err
+	}
+	imageType := "-i"
+	if imageStat.IsDir() {
+		imageType = "-D"
+	}
+	args := []string{imageType, c.Image}
+
+	if c.Boot {
+		args = append(args, "--boot")
+	}
+	if c.Ephemeral {
+		args = append(args, "--ephemeral")
+	}
+	if c.NetworkVeth {
+		args = append(args, "--network-veth")
+	}
+	if c.ProcessTwo {
+		args = append(args, "--as-pid2")
+	}
+	if c.ReadOnly {
+		args = append(args, "--read-only")
+	}
+	if c.UserNamespacing {
+		args = append(args, "-U")
+	}
+	if c.Console != "" {
+		args = append(args, "--console", c.Console)
+	}
+	if c.Machine != "" {
+		args = append(args, "--machine", c.Machine)
+	}
+	if c.PivotRoot != "" {
+		args = append(args, "--pivot-root", c.PivotRoot)
+	}
+	if c.ResolvConf != "" {
+		args = append(args, "--resolv-conf", c.ResolvConf)
+	}
+	if c.User != "" {
+		args = append(args, "--user", c.User)
+	}
+	if c.Volatile != "" {
+		args = append(args, "--volatile", c.Volatile)
+	}
+	if c.WorkingDirectory != "" {
+		args = append(args, "--chdir", c.WorkingDirectory)
+	}
+	for k, v := range c.Bind {
+		args = append(args, "--bind", k+":"+v)
+	}
+	for k, v := range c.BindReadOnly {
+		args = append(args, "--bind-ro", k+":"+v)
+	}
+	for k, v := range c.Environment {
+		args = append(args, "-E", k+"="+v)
+	}
+	if c.Command != "" {
+		args = append(args, c.Command)
+	}
+	return args, nil
+}
+
 func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) {
 	c, e := machine1.New()
 	if e != nil {
@@ -259,6 +349,26 @@ func (s *MapStrInt) CodecDecodeSelf(dec *codec.Decoder) {
 	dec.MustDecode(&ms)
 
 	r := map[string]int{}
+	for _, m := range ms {
+		for k, v := range m {
+			r[k] = v
+		}
+	}
+	*s = r
+}
+
+type MapStrStr map[string]string
+
+func (s *MapStrStr) CodecEncodeSelf(enc *codec.Encoder) {
+	v := []map[string]string{*s}
+	enc.MustEncode(v)
+}
+
+func (s *MapStrStr) CodecDecodeSelf(dec *codec.Decoder) {
+	ms := []map[string]string{}
+	dec.MustDecode(&ms)
+
+	r := map[string]string{}
 	for _, m := range ms {
 		for k, v := range m {
 			r[k] = v
