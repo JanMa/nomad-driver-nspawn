@@ -64,6 +64,8 @@ type MachineConfig struct {
 	Bind             MapStrStr `codec:"bind"`
 	BindReadOnly     MapStrStr `codec:"bind_read_only"`
 	Environment      MapStrStr `codec:"environment"`
+	Port             MapStrStr `codec:"port"`
+	PortMap          MapStrInt `codec:"port_map"`
 }
 
 func (c *MachineConfig) ConfigArray() ([]string, error) {
@@ -128,6 +130,9 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	}
 	for k, v := range c.Environment {
 		args = append(args, "-E", k+"="+v)
+	}
+	for _, v := range c.Port {
+		args = append(args, "-p", v)
 	}
 	if c.Command != "" {
 		args = append(args, c.Command)

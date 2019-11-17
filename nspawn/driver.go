@@ -56,7 +56,6 @@ var (
 	// taskConfigSpec is the hcl specification for the driver config section of
 	// a task within a job. It is returned in the TaskConfigSchema RPC
 	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		"port_map": hclspec.NewAttr("port_map", "list(map(number))", false),
 		"machine_config": hclspec.NewBlock("machine_config", true, hclspec.NewObject(map[string]*hclspec.Spec{
 			"boot": hclspec.NewDefault(
 				hclspec.NewAttr("boot", "bool", false),
@@ -85,6 +84,7 @@ var (
 			"bind":              hclspec.NewAttr("bind", "list(map(string))", false),
 			"bind_read_only":    hclspec.NewAttr("bind_read_only", "list(map(string))", false),
 			"environment":       hclspec.NewAttr("environment", "list(map(string))", false),
+			"port_map":          hclspec.NewAttr("port_map", "list(map(number))", false),
 		})),
 	})
 
@@ -132,8 +132,7 @@ type Config struct {
 
 // TaskConfig is the driver configuration of a task within a job
 type TaskConfig struct {
-	PortMap MapStrInt     `codec:"port_map"`
-	Config  MachineConfig `codec:"machine_config"`
+	Config MachineConfig `codec:"machine_config"`
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -275,6 +274,49 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle.Config = cfg
 
 	driverConfig.Config.Machine = cfg.AllocID
+	driverConfig.Config.Port = make(map[string]string)
+
+	// Setup port mapping and exposed ports
+	if len(cfg.Resources.NomadResources.Networks) == 0 {
+		d.logger.Debug("no network interfaces are available")
+		if len(driverConfig.Config.PortMap) > 0 {
+			d.logger.Error("Trying to map ports but no network interface is available")
+		}
+	} else {
+		network := cfg.Resources.NomadResources.Networks[0]
+		for _, port := range network.ReservedPorts {
+			// By default we will map the allocated port 1:1 to the container
+			machinePort := port.Value
+
+			// If the user has mapped a port using port_map we'll change it here
+			if mapped, ok := driverConfig.Config.PortMap[port.Label]; ok {
+				machinePort = mapped
+			}
+
+			hostPort := port.Value
+			driverConfig.Config.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
+
+			d.logger.Debug("allocated static port", "ip", network.IP, "port", hostPort)
+			d.logger.Debug("exposed port", "port", machinePort)
+		}
+
+		for _, port := range network.DynamicPorts {
+			// By default we will map the allocated port 1:1 to the container
+			machinePort := port.Value
+
+			// If the user has mapped a port using port_map we'll change it here
+			if mapped, ok := driverConfig.Config.PortMap[port.Label]; ok {
+				machinePort = mapped
+			}
+
+			hostPort := port.Value
+			driverConfig.Config.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
+
+			d.logger.Debug("allocated mapped port", "ip", network.IP, "port", hostPort)
+			d.logger.Debug("exposed port", "port", machinePort)
+		}
+
+	}
 
 	args, err := driverConfig.Config.ConfigArray()
 	if err != nil {
@@ -315,48 +357,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		cmd.Stderr = stderr
 	}
 
-	// Setup port mapping and exposed ports
-	if len(cfg.Resources.NomadResources.Networks) == 0 {
-		d.logger.Debug("no network interfaces are available")
-		if len(driverConfig.PortMap) > 0 {
-			d.logger.Error("Trying to map ports but no network interface is available")
-		}
-	} else {
-		network := cfg.Resources.NomadResources.Networks[0]
-		for _, port := range network.ReservedPorts {
-			// By default we will map the allocated port 1:1 to the container
-			machinePort := port.Value
-
-			// If the user has mapped a port using port_map we'll change it here
-			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
-				machinePort = mapped
-			}
-
-			hostPort := port.Value
-			cmd.Args = append(cmd.Args, "-p", fmt.Sprintf("%d:%d", hostPort, machinePort))
-
-			d.logger.Debug("allocated static port", "ip", network.IP, "port", hostPort)
-			d.logger.Debug("exposed port", "port", machinePort)
-		}
-
-		for _, port := range network.DynamicPorts {
-			// By default we will map the allocated port 1:1 to the container
-			machinePort := port.Value
-
-			// If the user has mapped a port using port_map we'll change it here
-			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
-				machinePort = mapped
-			}
-
-			hostPort := port.Value
-			cmd.Args = append(cmd.Args, "-p", fmt.Sprintf("%d:%d", hostPort, machinePort))
-
-			d.logger.Debug("allocated mapped port", "ip", network.IP, "port", hostPort)
-			d.logger.Debug("exposed port", "port", machinePort)
-		}
-
-	}
-
 	err = cmd.Start()
 	defer cmd.Process.Release()
 	if err != nil {
@@ -379,7 +379,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
 	network := &drivers.DriverNetwork{
-		PortMap:       driverConfig.PortMap,
+		PortMap:       driverConfig.Config.PortMap,
 		IP:            addr.IPv4.String(),
 		AutoAdvertise: false,
 	}
