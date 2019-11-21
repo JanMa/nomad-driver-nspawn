@@ -52,7 +52,7 @@ type MachineConfig struct {
 	ProcessTwo       bool      `codec:"process_two"`
 	ReadOnly         bool      `codec:"read_only"`
 	UserNamespacing  bool      `codec:"user_namespacing"`
-	Command          string    `codec:"command"`
+	Command          []string  `codec:"command"`
 	Console          string    `codec:"console"`
 	Image            string    `codec:"image"`
 	Machine          string    `codec:"machine"`
@@ -134,8 +134,8 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	for _, v := range c.Port {
 		args = append(args, "-p", v)
 	}
-	if c.Command != "" {
-		args = append(args, c.Command)
+	if len(c.Command) > 0 {
+		args = append(args, c.Command...)
 	}
 	return args, nil
 }

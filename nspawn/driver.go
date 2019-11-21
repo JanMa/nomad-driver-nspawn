@@ -56,36 +56,34 @@ var (
 	// taskConfigSpec is the hcl specification for the driver config section of
 	// a task within a job. It is returned in the TaskConfigSchema RPC
 	taskConfigSpec = hclspec.NewObject(map[string]*hclspec.Spec{
-		"machine_config": hclspec.NewBlock("machine_config", true, hclspec.NewObject(map[string]*hclspec.Spec{
-			"boot": hclspec.NewDefault(
-				hclspec.NewAttr("boot", "bool", false),
-				hclspec.NewLiteral("true"),
-			),
-			"ephemeral": hclspec.NewAttr("ephemeral", "bool", false),
-			"network_veth": hclspec.NewDefault(
-				hclspec.NewAttr("network_veth", "bool", false),
-				hclspec.NewLiteral("true"),
-			),
-			"process_two": hclspec.NewAttr("process_two", "bool", false),
-			"read_only":   hclspec.NewAttr("read_only", "bool", false),
-			"user_namespacing": hclspec.NewDefault(
-				hclspec.NewAttr("user_namespacing", "bool", false),
-				hclspec.NewLiteral("true"),
-			),
-			"command": hclspec.NewAttr("command", "string", false),
-			"console": hclspec.NewAttr("console", "string", false),
-			"image":   hclspec.NewAttr("image", "string", true),
-			// "machine":           hclspec.NewAttr("machine", "string", false),
-			"pivot_root":        hclspec.NewAttr("pivot_root", "string", false),
-			"resolv_conf":       hclspec.NewAttr("resolv_conf", "string", false),
-			"user":              hclspec.NewAttr("user", "string", false),
-			"volatile":          hclspec.NewAttr("volatile", "string", false),
-			"working_directory": hclspec.NewAttr("working_directory", "string", false),
-			"bind":              hclspec.NewAttr("bind", "list(map(string))", false),
-			"bind_read_only":    hclspec.NewAttr("bind_read_only", "list(map(string))", false),
-			"environment":       hclspec.NewAttr("environment", "list(map(string))", false),
-			"port_map":          hclspec.NewAttr("port_map", "list(map(number))", false),
-		})),
+		"boot": hclspec.NewDefault(
+			hclspec.NewAttr("boot", "bool", false),
+			hclspec.NewLiteral("true"),
+		),
+		"ephemeral": hclspec.NewAttr("ephemeral", "bool", false),
+		"network_veth": hclspec.NewDefault(
+			hclspec.NewAttr("network_veth", "bool", false),
+			hclspec.NewLiteral("true"),
+		),
+		"process_two": hclspec.NewAttr("process_two", "bool", false),
+		"read_only":   hclspec.NewAttr("read_only", "bool", false),
+		"user_namespacing": hclspec.NewDefault(
+			hclspec.NewAttr("user_namespacing", "bool", false),
+			hclspec.NewLiteral("true"),
+		),
+		"command": hclspec.NewAttr("command", "list(string)", false),
+		"console": hclspec.NewAttr("console", "string", false),
+		"image":   hclspec.NewAttr("image", "string", true),
+		// "machine":           hclspec.NewAttr("machine", "string", false),
+		"pivot_root":        hclspec.NewAttr("pivot_root", "string", false),
+		"resolv_conf":       hclspec.NewAttr("resolv_conf", "string", false),
+		"user":              hclspec.NewAttr("user", "string", false),
+		"volatile":          hclspec.NewAttr("volatile", "string", false),
+		"working_directory": hclspec.NewAttr("working_directory", "string", false),
+		"bind":              hclspec.NewAttr("bind", "list(map(string))", false),
+		"bind_read_only":    hclspec.NewAttr("bind_read_only", "list(map(string))", false),
+		"environment":       hclspec.NewAttr("environment", "list(map(string))", false),
+		"port_map":          hclspec.NewAttr("port_map", "list(map(number))", false),
 	})
 
 	// capabilities is returned by the Capabilities RPC and indicates what
@@ -128,11 +126,6 @@ type Driver struct {
 type Config struct {
 	// Enabled is set to true to enable the nspawn driver
 	Enabled bool `codec:"enabled"`
-}
-
-// TaskConfig is the driver configuration of a task within a job
-type TaskConfig struct {
-	Config MachineConfig `codec:"machine_config"`
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -264,7 +257,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("task with ID %q already started", cfg.ID)
 	}
 
-	var driverConfig TaskConfig
+	var driverConfig MachineConfig
 	if err := cfg.DecodeDriverConfig(&driverConfig); err != nil {
 		return nil, nil, fmt.Errorf("failed to decode driver config: %v", err)
 	}
@@ -273,13 +266,13 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
-	driverConfig.Config.Machine = cfg.AllocID
-	driverConfig.Config.Port = make(map[string]string)
+	driverConfig.Machine = cfg.AllocID
+	driverConfig.Port = make(map[string]string)
 
 	// Setup port mapping and exposed ports
 	if len(cfg.Resources.NomadResources.Networks) == 0 {
 		d.logger.Debug("no network interfaces are available")
-		if len(driverConfig.Config.PortMap) > 0 {
+		if len(driverConfig.PortMap) > 0 {
 			d.logger.Error("Trying to map ports but no network interface is available")
 		}
 	} else {
@@ -289,12 +282,12 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 			machinePort := port.Value
 
 			// If the user has mapped a port using port_map we'll change it here
-			if mapped, ok := driverConfig.Config.PortMap[port.Label]; ok {
+			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
 				machinePort = mapped
 			}
 
 			hostPort := port.Value
-			driverConfig.Config.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
+			driverConfig.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
 
 			d.logger.Debug("allocated static port", "ip", network.IP, "port", hostPort)
 			d.logger.Debug("exposed port", "port", machinePort)
@@ -305,12 +298,12 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 			machinePort := port.Value
 
 			// If the user has mapped a port using port_map we'll change it here
-			if mapped, ok := driverConfig.Config.PortMap[port.Label]; ok {
+			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
 				machinePort = mapped
 			}
 
 			hostPort := port.Value
-			driverConfig.Config.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
+			driverConfig.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
 
 			d.logger.Debug("allocated mapped port", "ip", network.IP, "port", hostPort)
 			d.logger.Debug("exposed port", "port", machinePort)
@@ -318,7 +311,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	}
 
-	args, err := driverConfig.Config.ConfigArray()
+	args, err := driverConfig.ConfigArray()
 	if err != nil {
 		d.logger.Error("Error generating machine config", "error", err)
 		return nil, nil, err
@@ -379,7 +372,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
 	network := &drivers.DriverNetwork{
-		PortMap:       driverConfig.Config.PortMap,
+		PortMap:       driverConfig.PortMap,
 		IP:            addr.IPv4.String(),
 		AutoAdvertise: false,
 	}
@@ -410,7 +403,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	driverState := TaskState{
-		MachineName: p.Name,
+		MachineName: cfg.AllocID,
 		TaskConfig:  cfg,
 		StartedAt:   h.startedAt,
 	}
