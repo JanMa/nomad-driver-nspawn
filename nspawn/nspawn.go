@@ -39,8 +39,7 @@ type MachineProps struct {
 }
 
 type MachineAddrs struct {
-	IPv4         net.IP
-	LocalUnicast net.IP
+	IPv4 net.IP
 	//TODO: add parsing for IPv6
 	// IPv6         net.IP
 }
@@ -231,15 +230,16 @@ func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error)
 		done <- true
 	}()
 
+	var result *dbus.Call
 	for {
 		select {
 		case <-done:
 			ticker.Stop()
-			return nil, fmt.Errorf("timed out while getting machine addresses")
+			return nil, fmt.Errorf("timed out while getting machine addresses: %+v", result.Err)
 		case <-ticker.C:
-			result := obj.Call(fmt.Sprintf("%s.%s", dbusInterface, "GetMachineAddresses"), 0, name)
+			result = obj.Call(fmt.Sprintf("%s.%s", dbusInterface, "GetMachineAddresses"), 0, name)
 			if result.Err != nil {
-				return nil, result.Err
+				return nil, fmt.Errorf("failed to call dbus: %+v", result.Err)
 			}
 
 			addrs := MachineAddrs{}
@@ -252,15 +252,13 @@ func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error)
 					for _, o := range a {
 						ip = append(ip, byte(o))
 					}
-					if ip.IsLinkLocalUnicast() {
-						addrs.LocalUnicast = ip
-					} else {
+					if !ip.IsLinkLocalUnicast() {
 						addrs.IPv4 = ip
 					}
 				}
 			}
 
-			if len(addrs.IPv4) > 0 && len(addrs.LocalUnicast) > 0 {
+			if len(addrs.IPv4) > 0 {
 				ticker.Stop()
 				return &addrs, nil
 			}
