@@ -361,13 +361,15 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	p, e := DescribeMachine(cfg.AllocID, machinePropertiesTimeout)
 	if e != nil {
 		d.logger.Error("failed to get machine information", "error", e)
+		//TODO: cleanup and exit if failed
 		return nil, nil, e
 	}
 	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
 
 	addr, err := MachineAddresses(cfg.AllocID, machineAddressTimeout)
 	if err != nil {
-		d.logger.Error("failed to get machine addresses", "error", e)
+		d.logger.Error("failed to get machine addresses", "error", e, "addresses", addr)
+		//TODO: cleanup and exit if failed
 	}
 
 	d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
@@ -380,6 +382,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
 	if err != nil {
 		d.logger.Error("failed to get container cgroup", "error", err)
+		//TODO: cleanup and exit if failed
 		return nil, nil, err
 	}
 

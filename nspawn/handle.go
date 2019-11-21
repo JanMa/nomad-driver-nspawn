@@ -200,6 +200,7 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 func (h *taskHandle) shutdown(timeout time.Duration) error {
 	cmd := exec.Command("machinectl", "stop", h.machine.Name)
 	out, err := cmd.CombinedOutput()
+	//TODO: implement timeout to kill
 	if err != nil {
 		h.logger.Error(fmt.Sprintf("error shutting down", "error", string(out), "machine", h.machine.Name))
 		return err
