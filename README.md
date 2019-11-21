@@ -8,8 +8,10 @@ not ready to be used yet!**
 - [x] Support for images
 - [x] Port forwarding
 - [x] IPTables rules
-- [ ] Improve task config
+- [x] Improve task config
 - [ ] download images
 - [ ] support network modes
-- [ ] support volumes
+- [x] support volumes
 - [ ] support env vars
+- [ ] support exec commands
+- [ ] bind task directories in container
