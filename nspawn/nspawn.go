@@ -152,13 +152,14 @@ func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) 
 		done <- true
 	}()
 
+	var p map[string]interface{}
 	for {
 		select {
 		case <-done:
 			ticker.Stop()
-			return nil, fmt.Errorf("timed out while getting machine properties")
+			return nil, fmt.Errorf("timed out while getting machine properties: %+v", e)
 		case <-ticker.C:
-			p, e := c.DescribeMachine(name)
+			p, e = c.DescribeMachine(name)
 			if e == nil {
 				ticker.Stop()
 				return &MachineProps{
@@ -218,7 +219,7 @@ func (p *MachineProps) ConfigureIPTablesRules(delete bool) error {
 func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error) {
 	dbusConn, err := setupPrivateSystemBus()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to dbus: %+v", err)
 	}
 	defer dbusConn.Close()
 
