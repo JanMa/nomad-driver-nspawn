@@ -15,6 +15,7 @@ import (
 	"github.com/coreos/go-systemd/machine1"
 	systemdUtil "github.com/coreos/go-systemd/util"
 	"github.com/godbus/dbus"
+	hclog "github.com/hashicorp/go-hclog"
 	"github.com/ugorji/go/codec"
 )
 
@@ -379,4 +380,44 @@ func (s *MapStrStr) CodecDecodeSelf(dec *codec.Decoder) {
 		}
 	}
 	*s = r
+}
+
+func shutdown(name string, timeout time.Duration, logger hclog.Logger) error {
+	cmd := exec.Command("machinectl", "stop", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Error("error shutting down", "error", strings.TrimSpace(string(out)), "machine", name)
+		return err
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	done := make(chan bool)
+	go func() {
+		time.Sleep(timeout - 2*time.Second)
+		done <- true
+	}()
+	for {
+		select {
+		case <-done:
+			ticker.Stop()
+			e := exec.Command("machinectl", "kill", name, "-s", "SIGKILL").Run()
+			if e != nil {
+				logger.Error("error killing machine", "error", e, "machine", name)
+				return fmt.Errorf("failed to kill machine: %+v", e)
+			}
+			_, e = DescribeMachine(name, time.Second)
+			if e == nil {
+				logger.Error("failed to shut down machine in time", "machine", name)
+				return fmt.Errorf("failed to shutdown machine in time")
+			}
+			logger.Debug("shutdown successful", "machine", name)
+			return nil
+		case <-ticker.C:
+			_, e := DescribeMachine(name, time.Second)
+			if e != nil {
+				ticker.Stop()
+				logger.Debug("shutdown successful", "machine", name)
+				return nil
+			}
+		}
+	}
 }

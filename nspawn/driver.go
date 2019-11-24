@@ -358,18 +358,19 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	// wait for boot
-	p, e := DescribeMachine(cfg.AllocID, machinePropertiesTimeout)
-	if e != nil {
-		d.logger.Error("failed to get machine information", "error", e)
-		//TODO: cleanup and exit if failed
-		return nil, nil, e
+	p, err := DescribeMachine(cfg.AllocID, machinePropertiesTimeout)
+	if err != nil {
+		d.logger.Error("failed to get machine information", "error", err)
+		shutdown(cfg.AllocID, 5*time.Second, d.logger)
+		return nil, nil, err
 	}
 	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
 
 	addr, err := MachineAddresses(cfg.AllocID, machineAddressTimeout)
 	if err != nil {
-		d.logger.Error("failed to get machine addresses", "error", e, "addresses", addr)
-		//TODO: cleanup and exit if failed
+		d.logger.Error("failed to get machine addresses", "error", err, "addresses", addr)
+		shutdown(cfg.AllocID, 5*time.Second, d.logger)
+		return nil, nil, err
 	}
 
 	d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
@@ -382,7 +383,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
 	if err != nil {
 		d.logger.Error("failed to get container cgroup", "error", err)
-		//TODO: cleanup and exit if failed
+		shutdown(cfg.AllocID, 5*time.Second, d.logger)
 		return nil, nil, err
 	}
 

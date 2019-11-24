@@ -2,8 +2,6 @@ package nspawn
 
 import (
 	"context"
-	"fmt"
-	"os/exec"
 	"strconv"
 	"sync"
 	"time"
@@ -198,41 +196,5 @@ func (h *taskHandle) handleStats(ctx context.Context, ch chan *drivers.TaskResou
 }
 
 func (h *taskHandle) shutdown(timeout time.Duration) error {
-	cmd := exec.Command("machinectl", "stop", h.machine.Name)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		h.logger.Error(fmt.Sprintf("error shutting down", "error", string(out), "machine", h.machine.Name))
-		return err
-	}
-	ticker := time.NewTicker(2 * time.Second)
-	done := make(chan bool)
-	go func() {
-		time.Sleep(timeout - 2*time.Second)
-		done <- true
-	}()
-	for {
-		select {
-		case <-done:
-			ticker.Stop()
-			e := exec.Command("machinectl", "kill", h.machine.Name, "-s", "SIGKILL").Run()
-			if e != nil {
-				h.logger.Error(fmt.Sprintf("error killing machine", "error", e, "machine", h.machine.Name))
-				return fmt.Errorf("failed to kill machine: %+v", e)
-			}
-			_, e = DescribeMachine(h.machine.Name, time.Second)
-			if e == nil {
-				h.logger.Error(fmt.Sprintf("failed to shut down machine in time", "machine", h.machine.Name))
-				return fmt.Errorf("failed to shutdown machine in time")
-			}
-			h.logger.Debug("shutdown successful", "machine", h.machine.Name)
-			return nil
-		case <-ticker.C:
-			_, e := DescribeMachine(h.machine.Name, time.Second)
-			if e != nil {
-				ticker.Stop()
-				h.logger.Debug("shutdown successful", "machine", h.machine.Name)
-				return nil
-			}
-		}
-	}
+	return shutdown(h.machine.Name, timeout, h.logger)
 }
