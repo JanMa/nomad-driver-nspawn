@@ -271,6 +271,10 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	driverConfig.Port = make(map[string]string)
 	//TODO: Ensure we can handle containers without private networking?
 	driverConfig.NetworkVeth = true
+	// pass predefined environment vars
+	for k, v := range cfg.Env {
+		driverConfig.Environment[k] = v
+	}
 
 	// Setup port mapping and exposed ports
 	if len(cfg.Resources.NomadResources.Networks) == 0 {

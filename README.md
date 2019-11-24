@@ -12,6 +12,7 @@ not ready to be used yet!**
 - [ ] download images
 - [ ] support network modes
 - [x] support volumes
-- [ ] support env vars
+- [x] support env vars
 - [ ] support exec commands
 - [ ] bind task directories in container
+- [ ] enforce resource limits
