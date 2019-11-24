@@ -476,13 +476,12 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 		return drivers.ErrTaskNotFound
 	}
 
-	if err := handle.shutdown(timeout); err != nil {
-		return fmt.Errorf("executor shutdown failed: %v", err)
+	if err := handle.machine.ConfigureIPTablesRules(true); err != nil {
+		d.logger.Error("Failed to remove IPTables rules", "error", err)
 	}
 
-	err := handle.machine.ConfigureIPTablesRules(true)
-	if err != nil {
-		d.logger.Error("Failed to remove IPTables rules", "error", err)
+	if err := handle.shutdown(timeout); err != nil {
+		return fmt.Errorf("executor shutdown failed: %v", err)
 	}
 
 	return nil
