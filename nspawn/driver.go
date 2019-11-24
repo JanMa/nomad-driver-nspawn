@@ -61,10 +61,11 @@ var (
 			hclspec.NewLiteral("true"),
 		),
 		"ephemeral": hclspec.NewAttr("ephemeral", "bool", false),
-		"network_veth": hclspec.NewDefault(
-			hclspec.NewAttr("network_veth", "bool", false),
-			hclspec.NewLiteral("true"),
-		),
+		//TODO: Ensure we can handle containers without private networking?
+		// "network_veth": hclspec.NewDefault(
+		// 	hclspec.NewAttr("network_veth", "bool", false),
+		// 	hclspec.NewLiteral("true"),
+		// ),
 		"process_two": hclspec.NewAttr("process_two", "bool", false),
 		"read_only":   hclspec.NewAttr("read_only", "bool", false),
 		"user_namespacing": hclspec.NewDefault(
@@ -268,6 +269,8 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	driverConfig.Machine = cfg.AllocID
 	driverConfig.Port = make(map[string]string)
+	//TODO: Ensure we can handle containers without private networking?
+	driverConfig.NetworkVeth = true
 
 	// Setup port mapping and exposed ports
 	if len(cfg.Resources.NomadResources.Networks) == 0 {
