@@ -25,6 +25,7 @@ require (
 	github.com/hashicorp/vault/api v1.0.4 // indirect
 	github.com/hpcloud/tail v1.0.0 // indirect
 	github.com/mitchellh/hashstructure v1.0.0 // indirect
+	github.com/opencontainers/runtime-spec v0.1.2-0.20190507144316-5b71a03e2700
 	github.com/shirou/gopsutil v2.19.9+incompatible // indirect
 	github.com/shirou/w32 v0.0.0-20160930032740-bb4de0191aa4 // indirect
 	github.com/ugorji/go/codec v1.1.7

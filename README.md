@@ -15,4 +15,4 @@ not ready to be used yet!**
 - [x] support env vars
 - [ ] support exec commands
 - [ ] bind task directories in container
-- [ ] enforce resource limits
+- [x] enforce resource limits

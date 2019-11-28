@@ -18,6 +18,7 @@ import (
 	driversUtil "github.com/hashicorp/nomad/plugins/drivers/utils"
 	"github.com/hashicorp/nomad/plugins/shared/hclspec"
 	pstructs "github.com/hashicorp/nomad/plugins/shared/structs"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 const (
@@ -264,6 +265,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	d.logger.Info("starting nspawn task", "driver_cfg", hclog.Fmt("%+v", driverConfig))
+	d.logger.Debug("resources", "nomad", fmt.Sprintf("%+v", cfg.Resources.NomadResources), "linux", fmt.Sprintf("%+v", cfg.Resources.LinuxResources))
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
@@ -390,6 +392,18 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
 	if err != nil {
 		d.logger.Error("failed to get container cgroup", "error", err)
+		shutdown(cfg.AllocID, 5*time.Second, d.logger)
+		return nil, nil, err
+	}
+
+	err = control.Update(&specs.LinuxResources{
+		Memory: &specs.LinuxMemory{
+			Limit: &cfg.Resources.LinuxResources.MemoryLimitBytes,
+		},
+	})
+
+	if err != nil {
+		d.logger.Error("failed set container resource limits", "error", err)
 		shutdown(cfg.AllocID, 5*time.Second, d.logger)
 		return nil, nil, err
 	}
