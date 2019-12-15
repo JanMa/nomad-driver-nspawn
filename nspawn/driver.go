@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -92,7 +94,7 @@ var (
 	// optional features this driver supports
 	capabilities = &drivers.Capabilities{
 		SendSignals: true,
-		Exec:        false,
+		Exec:        true,
 		FSIsolation: drivers.FSIsolationImage,
 	}
 )
@@ -566,8 +568,106 @@ func (d *Driver) SignalTask(taskID string, signal string) error {
 	return err
 }
 
+var _ drivers.ExecTaskStreamingDriver = (*Driver)(nil)
+
+func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *drivers.ExecOptions) (*drivers.ExitResult, error) {
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return nil, drivers.ErrTaskNotFound
+	}
+
+	err := execSupported(handle)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(opts.Command) == 0 {
+		return nil, fmt.Errorf("command is required but was empty")
+	}
+
+	c, e := execCommand(ctx, handle, opts.Command, opts.Stdin, opts.Stdout, opts.Stderr, opts.Tty)
+
+	return &drivers.ExitResult{
+		ExitCode: c,
+		Err:      e,
+	}, nil
+}
+
 func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
-	return nil, fmt.Errorf("Nspawn driver does not support exec")
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return nil, drivers.ErrTaskNotFound
+	}
+
+	err := execSupported(handle)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(cmd) == 0 {
+		return nil, fmt.Errorf("command is required but was empty")
+	}
+
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := execCommand(context.TODO(), handle, cmd, nil, outW, errW, false)
+	if err != nil {
+		return nil, err
+	}
+	result := drivers.ExecTaskResult{}
+	result.Stdout, _ = ioutil.ReadAll(outR)
+	result.Stderr, _ = ioutil.ReadAll(errR)
+	result.ExitResult = &drivers.ExitResult{
+		ExitCode: c,
+	}
+	return &result, nil
+}
+
+// execSupported checks if container was stared with boot parameter, otherwise
+// systemd-run does not work
+func execSupported(handle *taskHandle) error {
+	var driverConfig MachineConfig
+	if err := handle.taskConfig.DecodeDriverConfig(&driverConfig); err != nil {
+		return fmt.Errorf("failed to decode driver config: %v", err)
+	}
+	if !driverConfig.Boot {
+		return fmt.Errorf("cannot exec command in task started without boot parameter")
+	}
+	return nil
+}
+
+func execCommand(ctx context.Context, handle *taskHandle, args []string, in io.Reader, out, err io.Writer, tty bool) (int, error) {
+
+	c := exec.CommandContext(ctx, "systemd-run", "--wait", "--service-type=exec",
+		"--collect", "--quiet", "--machine", handle.machine.Name)
+	if tty {
+		c.Args = append(c.Args, "--pty", "--send-sighup")
+	} else {
+		c.Args = append(c.Args, "--pipe")
+	}
+	c.Args = append(c.Args, args...)
+
+	c.Stdin = in
+	c.Stdout = out
+	c.Stderr = err
+
+	handle.logger.Debug("executing command", "args", c.Args)
+	e := c.Start()
+	if e != nil {
+		return c.ProcessState.ExitCode(), e
+	}
+
+	e = c.Wait()
+
+	return c.ProcessState.ExitCode(), e
 }
 
 func (d *Driver) PluginInfo() (*base.PluginInfoResponse, error) {
