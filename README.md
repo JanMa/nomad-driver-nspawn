@@ -139,6 +139,6 @@ should cover a broad range of use cases:
 ## TODO
 - [ ] download images via `machinectl`
 - [ ] support network modes
-- [ ] support exec commands
+- [x] support exec commands
 - [x] bind task directories in container
 - [ ] write tests
