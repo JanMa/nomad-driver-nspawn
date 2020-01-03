@@ -1,0 +1,9 @@
+[Distribution]
+Distribution=debian
+Release=stable
+
+[Output]
+Format=directory
+
+[Validation]
+Password=root
