@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -73,7 +74,15 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 		return nil, fmt.Errorf("no image configured")
 	}
 	// check if image exists
-	imageStat, err := os.Stat(c.Image)
+	imagePath := c.Image
+	if !filepath.IsAbs(c.Image) {
+		pwd, e := os.Getwd()
+		if e != nil {
+			return nil, e
+		}
+		imagePath = filepath.Join(pwd, c.Image)
+	}
+	imageStat, err := os.Stat(imagePath)
 	if err != nil {
 		return nil, err
 	}
