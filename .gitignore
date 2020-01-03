@@ -13,3 +13,10 @@
 
 # Binarys
 nomad-driver-nspawn
+
+# mkosi related files
+**/.mkosi*/*
+**/image/*
+
+# systemd-nspawn related
+*.lck
