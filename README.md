@@ -141,3 +141,4 @@ should cover a broad range of use cases:
 - [ ] support network modes
 - [ ] support exec commands
 - [ ] bind task directories in container
+- [ ] write tests
