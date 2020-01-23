@@ -91,7 +91,7 @@ var (
 	// capabilities is returned by the Capabilities RPC and indicates what
 	// optional features this driver supports
 	capabilities = &drivers.Capabilities{
-		SendSignals: false,
+		SendSignals: true,
 		Exec:        false,
 		FSIsolation: drivers.FSIsolationImage,
 	}
@@ -549,7 +549,15 @@ func (d *Driver) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, err
 }
 
 func (d *Driver) SignalTask(taskID string, signal string) error {
-	return fmt.Errorf("Nspawn driver does not support signals")
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return drivers.ErrTaskNotFound
+	}
+	err := exec.Command("machinectl", "kill", handle.machine.Name, "-s", signal).Run()
+	if err != nil {
+		handle.logger.Debug("Failed to signal task", "Error", fmt.Sprintf("%+v", err))
+	}
+	return err
 }
 
 func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
