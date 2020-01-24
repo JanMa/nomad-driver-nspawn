@@ -222,7 +222,7 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
-	p, e := DescribeMachine(taskState.TaskConfig.AllocID, machinePropertiesTimeout)
+	p, e := DescribeMachine(taskState.MachineName, machinePropertiesTimeout)
 	if e != nil {
 		d.logger.Error("failed to get machine information", "error", e)
 		return e
@@ -269,7 +269,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
-	driverConfig.Machine = cfg.AllocID
+	driverConfig.Machine = cfg.Name + "-" + cfg.AllocID
 	driverConfig.Port = make(map[string]string)
 	//TODO: Ensure we can handle containers without private networking?
 	driverConfig.NetworkVeth = true
@@ -373,18 +373,18 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	// wait for boot
-	p, err := DescribeMachine(cfg.AllocID, machinePropertiesTimeout)
+	p, err := DescribeMachine(driverConfig.Machine, machinePropertiesTimeout)
 	if err != nil {
 		d.logger.Error("failed to get machine information", "error", err)
-		shutdown(cfg.AllocID, 5*time.Second, d.logger)
+		shutdown(driverConfig.Machine, 5*time.Second, d.logger)
 		return nil, nil, err
 	}
 	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
 
-	addr, err := MachineAddresses(cfg.AllocID, machineAddressTimeout)
+	addr, err := MachineAddresses(driverConfig.Machine, machineAddressTimeout)
 	if err != nil {
 		d.logger.Error("failed to get machine addresses", "error", err, "addresses", addr)
-		shutdown(cfg.AllocID, 5*time.Second, d.logger)
+		shutdown(driverConfig.Machine, 5*time.Second, d.logger)
 		return nil, nil, err
 	}
 
@@ -398,7 +398,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
 	if err != nil {
 		d.logger.Error("failed to get container cgroup", "error", err)
-		shutdown(cfg.AllocID, 5*time.Second, d.logger)
+		shutdown(driverConfig.Machine, 5*time.Second, d.logger)
 		return nil, nil, err
 	}
 
@@ -410,7 +410,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	if err != nil {
 		d.logger.Error("failed set container resource limits", "error", err)
-		shutdown(cfg.AllocID, 5*time.Second, d.logger)
+		shutdown(driverConfig.Machine, 5*time.Second, d.logger)
 		return nil, nil, err
 	}
 
@@ -434,7 +434,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	driverState := TaskState{
-		MachineName: cfg.AllocID,
+		MachineName: driverConfig.Machine,
 		TaskConfig:  cfg,
 		StartedAt:   h.startedAt,
 	}
