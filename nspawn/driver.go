@@ -278,6 +278,12 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		driverConfig.Environment[k] = v
 	}
 
+	// bind Task Directories into container
+	taskDirs := cfg.TaskDir()
+	driverConfig.Bind[taskDirs.SharedAllocDir] = cfg.Env["NOMAD_ALLOC_DIR"]
+	driverConfig.Bind[taskDirs.LocalDir] = cfg.Env["NOMAD_TASK_DIR"]
+	driverConfig.Bind[taskDirs.SecretsDir] = cfg.Env["NOMAD_SECRETS_DIR"]
+
 	// Setup port mapping and exposed ports
 	if len(cfg.Resources.NomadResources.Networks) == 0 {
 		d.logger.Debug("no network interfaces are available")

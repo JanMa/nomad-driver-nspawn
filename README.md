@@ -140,5 +140,5 @@ should cover a broad range of use cases:
 - [ ] download images via `machinectl`
 - [ ] support network modes
 - [ ] support exec commands
-- [ ] bind task directories in container
+- [x] bind task directories in container
 - [ ] write tests
