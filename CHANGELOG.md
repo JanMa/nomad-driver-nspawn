@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Support for task signals. `nomad alloc signal` is now working.
   - Bind task directories into started containers.
   - Added CHANGELOG to project.
+  - Support for command execution inside tasks. `nomad alloc exec` is now
+    working in containers started with the `boot` parameter.
 ### Changed
   - Naming of started containers now matches the schema of the docker driver
     `<task-name>-<allocID>`.
