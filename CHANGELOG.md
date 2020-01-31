@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
   - Naming of started containers now matches the schema of the docker driver
     `<task-name>-<allocID>`.
+### Fixed
+  - Fixed argument parsing for `volatile` and `console` options.
 
 ## [0.0.1] - 2020-01-12
 Initial release. A minimal implementation to be able to run containers with

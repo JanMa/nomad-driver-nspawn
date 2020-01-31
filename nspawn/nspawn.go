@@ -111,7 +111,7 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 		args = append(args, "-U")
 	}
 	if c.Console != "" {
-		args = append(args, "--console", c.Console)
+		args = append(args, fmt.Sprintf("--console=%s", c.Console))
 	}
 	if c.Machine != "" {
 		args = append(args, "--machine", c.Machine)
@@ -126,7 +126,7 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 		args = append(args, "--user", c.User)
 	}
 	if c.Volatile != "" {
-		args = append(args, "--volatile", c.Volatile)
+		args = append(args, fmt.Sprintf("--volatile=%s", c.Volatile))
 	}
 	if c.WorkingDirectory != "" {
 		args = append(args, "--chdir", c.WorkingDirectory)
