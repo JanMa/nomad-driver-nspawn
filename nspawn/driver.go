@@ -266,8 +266,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
-	d.logger.Info("starting nspawn task", "driver_cfg", hclog.Fmt("%+v", driverConfig))
-	d.logger.Debug("resources", "nomad", fmt.Sprintf("%+v", cfg.Resources.NomadResources), "linux", fmt.Sprintf("%+v", cfg.Resources.LinuxResources))
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
@@ -328,12 +326,18 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	}
 
+	if err := driverConfig.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("failed to validate task config: %v", err)
+	}
+
 	args, err := driverConfig.ConfigArray()
 	if err != nil {
 		d.logger.Error("Error generating machine config", "error", err)
 		return nil, nil, err
 	}
 
+	d.logger.Info("starting nspawn task", "driver_cfg", hclog.Fmt("%+v", driverConfig))
+	d.logger.Debug("resources", "nomad", fmt.Sprintf("%+v", cfg.Resources.NomadResources), "linux", fmt.Sprintf("%+v", cfg.Resources.LinuxResources))
 	d.logger.Info("commad arguments", "args", args)
 
 	cmd := exec.Command("systemd-nspawn", args...)

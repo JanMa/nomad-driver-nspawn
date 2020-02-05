@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added CHANGELOG to project.
   - Support for command execution inside tasks. `nomad alloc exec` is now
     working in containers started with the `boot` parameter.
+  - Validate configuration before trying to start a task. The driver will
+    not try to start tasks with invalid configuration.
 ### Changed
   - Naming of started containers now matches the schema of the docker driver
     `<task-name>-<allocID>`.
