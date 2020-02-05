@@ -149,6 +149,55 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	return args, nil
 }
 
+func (c *MachineConfig) Validate() error {
+	if c.Volatile != "" {
+		switch c.Volatile {
+		case "yes", "state", "overlay", "no":
+		default:
+			return fmt.Errorf("invalid parameter for volatile")
+		}
+	}
+	if c.Console != "" {
+		switch c.Console {
+		case "interactive", "read-only", "passive", "pipe":
+		default:
+			return fmt.Errorf("invalid parameter for console")
+		}
+	}
+	if c.ResolvConf != "" {
+		switch c.ResolvConf {
+		case "copy-host", "copy-static", "bind-host",
+			"bind-static", "delete", "auto":
+		default:
+			return fmt.Errorf("invalid parameter for resolv_conf")
+		}
+	}
+	if c.Boot && c.ProcessTwo {
+		return fmt.Errorf("boot and process_two may not be combined")
+	}
+	if c.Volatile != "" && c.UserNamespacing {
+		return fmt.Errorf("volatile and user_namespacing may not be combined")
+	}
+	if c.ReadOnly && c.UserNamespacing {
+		return fmt.Errorf("read_only and user_namespacing may not be combined")
+	}
+	if !filepath.IsAbs(c.WorkingDirectory) {
+		return fmt.Errorf("working_directory is not an absolute path")
+	}
+	if c.PivotRoot != "" {
+		for _, p := range strings.Split(c.PivotRoot, ":") {
+			if !filepath.IsAbs(p) {
+				return fmt.Errorf("pivot_root is not an absolute path")
+			}
+		}
+	}
+	if c.Image == "/" && !(c.Ephemeral || (c.Volatile != "" && c.Volatile != "no")) {
+		return fmt.Errorf("starting a container from the root directory is not supported. Use ephemeral or volatile")
+	}
+
+	return nil
+}
+
 func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) {
 	c, e := machine1.New()
 	if e != nil {
