@@ -191,7 +191,7 @@ func (c *MachineConfig) Validate() error {
 			}
 		}
 	}
-	if c.Image == "/" && !(c.Ephemeral || (c.Volatile != "" && c.Volatile != "no")) {
+	if c.Image == "/" && !(c.Ephemeral || c.Volatile == "yes" || c.Volatile == "state") {
 		return fmt.Errorf("starting a container from the root directory is not supported. Use ephemeral or volatile")
 	}
 
