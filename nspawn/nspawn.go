@@ -181,7 +181,7 @@ func (c *MachineConfig) Validate() error {
 	if c.ReadOnly && c.UserNamespacing {
 		return fmt.Errorf("read_only and user_namespacing may not be combined")
 	}
-	if !filepath.IsAbs(c.WorkingDirectory) {
+	if c.WorkingDirectory != "" && !filepath.IsAbs(c.WorkingDirectory) {
 		return fmt.Errorf("working_directory is not an absolute path")
 	}
 	if c.PivotRoot != "" {
