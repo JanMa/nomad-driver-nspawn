@@ -2,6 +2,7 @@ package nspawn
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	systemdDbus "github.com/coreos/go-systemd/dbus"
+	"github.com/coreos/go-systemd/import1"
 	"github.com/coreos/go-systemd/machine1"
 	systemdUtil "github.com/coreos/go-systemd/util"
 	"github.com/godbus/dbus"
@@ -24,6 +26,9 @@ const (
 	machineMonitorIntv = 2 * time.Second
 	dbusInterface      = "org.freedesktop.machine1.Manager"
 	dbusPath           = "/org/freedesktop/machine1"
+
+	TarImage string = "tar"
+	RawImage string = "raw"
 )
 
 type MachineProps struct {
@@ -47,26 +52,50 @@ type MachineAddrs struct {
 }
 
 type MachineConfig struct {
-	Boot             bool      `codec:"boot"`
-	Ephemeral        bool      `codec:"ephemeral"`
-	NetworkVeth      bool      `codec:"network_veth"`
-	ProcessTwo       bool      `codec:"process_two"`
-	ReadOnly         bool      `codec:"read_only"`
-	UserNamespacing  bool      `codec:"user_namespacing"`
-	Command          []string  `codec:"command"`
-	Console          string    `codec:"console"`
-	Image            string    `codec:"image"`
-	Machine          string    `codec:"machine"`
-	PivotRoot        string    `codec:"pivot_root"`
-	ResolvConf       string    `codec:"resolv_conf"`
-	User             string    `codec:"user"`
-	Volatile         string    `codec:"volatile"`
-	WorkingDirectory string    `codec:"working_directory"`
-	Bind             MapStrStr `codec:"bind"`
-	BindReadOnly     MapStrStr `codec:"bind_read_only"`
-	Environment      MapStrStr `codec:"environment"`
-	Port             MapStrStr `codec:"port"`
-	PortMap          MapStrInt `codec:"port_map"`
+	Boot             bool               `codec:"boot"`
+	Ephemeral        bool               `codec:"ephemeral"`
+	NetworkVeth      bool               `codec:"network_veth"`
+	ProcessTwo       bool               `codec:"process_two"`
+	ReadOnly         bool               `codec:"read_only"`
+	UserNamespacing  bool               `codec:"user_namespacing"`
+	Command          []string           `codec:"command"`
+	Console          string             `codec:"console"`
+	Image            string             `codec:"image"`
+	ImageDownload    *ImageDownloadOpts `codec:"image_download,omitempty"`
+	imagePath        string             `codec:"-"`
+	Machine          string             `codec:"machine"`
+	PivotRoot        string             `codec:"pivot_root"`
+	ResolvConf       string             `codec:"resolv_conf"`
+	User             string             `codec:"user"`
+	Volatile         string             `codec:"volatile"`
+	WorkingDirectory string             `codec:"working_directory"`
+	Bind             MapStrStr          `codec:"bind"`
+	BindReadOnly     MapStrStr          `codec:"bind_read_only"`
+	Environment      MapStrStr          `codec:"environment"`
+	Port             MapStrStr          `codec:"port"`
+	PortMap          MapStrInt          `codec:"port_map"`
+}
+
+type ImageType string
+
+type ImageProps struct {
+	CreationTimestamp     uint64
+	Limit                 uint64
+	LimitExclusive        uint64
+	ModificationTimestamp uint64
+	Name                  string
+	Path                  string
+	ReadOnly              bool
+	Type                  string
+	Usage                 uint64
+	UsageExclusive        uint64
+}
+
+type ImageDownloadOpts struct {
+	URL    string `codec:"url"`
+	Type   string `codec:"type"`
+	Force  bool   `codec:"force"`
+	Verify string `codec:"verify"`
 }
 
 func (c *MachineConfig) ConfigArray() ([]string, error) {
@@ -74,15 +103,7 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 		return nil, fmt.Errorf("no image configured")
 	}
 	// check if image exists
-	imagePath := c.Image
-	if !filepath.IsAbs(c.Image) {
-		pwd, e := os.Getwd()
-		if e != nil {
-			return nil, e
-		}
-		imagePath = filepath.Join(pwd, c.Image)
-	}
-	imageStat, err := os.Stat(imagePath)
+	imageStat, err := os.Stat(c.imagePath)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +111,7 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	if imageStat.IsDir() {
 		imageType = "-D"
 	}
-	args := []string{imageType, c.Image}
+	args := []string{imageType, c.imagePath}
 
 	if c.Boot {
 		args = append(args, "--boot")
@@ -478,4 +499,114 @@ func shutdown(name string, timeout time.Duration, logger hclog.Logger) error {
 			}
 		}
 	}
+}
+
+func DescribeImage(name string) (*ImageProps, error) {
+	conn, err := dbus.SystemBus()
+	if err != nil {
+		return nil, err
+	}
+
+	img := conn.Object("org.freedesktop.machine1", "/org/freedesktop/machine1")
+	var path dbus.ObjectPath
+
+	err = img.Call("org.freedesktop.machine1.Manager.GetImage", 0, name).Store(&path)
+	if err != nil {
+		return nil, err
+	}
+
+	obj := conn.Object("org.freedesktop.machine1", path)
+	props := make(map[string]interface{})
+
+	err = obj.Call("org.freedesktop.DBus.Properties.GetAll", 0, "").Store(&props)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ImageProps{
+		CreationTimestamp:     props["CreationTimestamp"].(uint64),
+		Limit:                 props["Limit"].(uint64),
+		LimitExclusive:        props["LimitExclusive"].(uint64),
+		ModificationTimestamp: props["ModificationTimestamp"].(uint64),
+		Name:                  props["Name"].(string),
+		Path:                  props["Path"].(string),
+		ReadOnly:              props["ReadOnly"].(bool),
+		Type:                  props["Type"].(string),
+		Usage:                 props["Usage"].(uint64),
+		UsageExclusive:        props["UsageExclusive"].(uint64),
+	}, nil
+}
+
+func DownloadImage(url, name, verify, imageType string, force bool, logger hclog.Logger) error {
+	c, err := import1.New()
+	if err != nil {
+		return err
+	}
+
+	var t *import1.Transfer
+	switch imageType {
+	case TarImage:
+		t, err = c.PullTar(url, name, verify, force)
+	case RawImage:
+		t, err = c.PullRaw(url, name, verify, force)
+	default:
+		return fmt.Errorf("unsupported image type")
+	}
+	if err != nil {
+		return err
+	}
+	logger.Info("downloading image", "image", name)
+
+	done := false
+	ticker := time.NewTicker(2 * time.Second)
+	for !done {
+		select {
+		case <-ticker.C:
+			tf, _ := c.ListTransfers()
+			if len(tf) == 0 {
+				done = true
+				ticker.Stop()
+				continue
+			}
+			found := false
+			for _, v := range tf {
+				if v.Id == t.Id {
+					found = true
+					if !(math.IsNaN(v.Progress) || math.IsInf(v.Progress, 0) || math.Abs(v.Progress) == math.MaxFloat64) {
+						logger.Info("downloading image", "image", name, "progress", v.Progress)
+					}
+				}
+			}
+			if !found {
+				done = true
+				ticker.Stop()
+			}
+		}
+	}
+
+	logger.Info("downloaded image", "image", name)
+	return nil
+}
+
+func (c *MachineConfig) GetImagePath() (string, error) {
+	// check if image is absolute or relative path
+	imagePath := c.Image
+	if !filepath.IsAbs(c.Image) {
+		pwd, e := os.Getwd()
+		if e != nil {
+			return "", e
+		}
+		imagePath = filepath.Join(pwd, c.Image)
+	}
+	// check if image exists
+	_, err := os.Stat(imagePath)
+	if err == nil {
+		return imagePath, err
+	}
+	// check if image is known to machinectl
+	p, err := DescribeImage(c.Image)
+	if err != nil {
+		return "", err
+	}
+	return p.Path, nil
 }
