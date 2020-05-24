@@ -78,6 +78,22 @@ var (
 		"command": hclspec.NewAttr("command", "list(string)", false),
 		"console": hclspec.NewAttr("console", "string", false),
 		"image":   hclspec.NewAttr("image", "string", true),
+		"image_download": hclspec.NewBlock("image_download", false,
+			hclspec.NewObject(map[string]*hclspec.Spec{
+				"url": hclspec.NewAttr("url", "string", true),
+				"type": hclspec.NewDefault(
+					hclspec.NewAttr("type", "string", false),
+					hclspec.NewLiteral(`"tar"`),
+				),
+				"force": hclspec.NewDefault(
+					hclspec.NewAttr("force", "bool", false),
+					hclspec.NewLiteral("false"),
+				),
+				"verify": hclspec.NewDefault(
+					hclspec.NewAttr("verify", "string", false),
+					hclspec.NewLiteral(`"no"`),
+				),
+			})),
 		// "machine":           hclspec.NewAttr("machine", "string", false),
 		"pivot_root":        hclspec.NewAttr("pivot_root", "string", false),
 		"resolv_conf":       hclspec.NewAttr("resolv_conf", "string", false),
@@ -326,10 +342,42 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	}
 
+	// Download image
+	if driverConfig.ImageDownload != nil {
+		d.eventer.EmitEvent(&drivers.TaskEvent{
+			TaskID:    cfg.ID,
+			AllocID:   cfg.AllocID,
+			TaskName:  cfg.Name,
+			Timestamp: time.Now(),
+			Message:   "Downloading image",
+			Annotations: map[string]string{
+				"image": driverConfig.Image,
+				"url":   driverConfig.ImageDownload.URL,
+			},
+		})
+		err := DownloadImage(driverConfig.ImageDownload.URL,
+			driverConfig.Image, driverConfig.ImageDownload.Verify,
+			driverConfig.ImageDownload.Type,
+			driverConfig.ImageDownload.Force, d.logger)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to download image: %v", err)
+		}
+	}
+
+	// Gather image path
+	imagePath, err := driverConfig.GetImagePath()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to gather image path: %v", err)
+	}
+
+	driverConfig.imagePath = imagePath
+
+	// Validate config
 	if err := driverConfig.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("failed to validate task config: %v", err)
 	}
 
+	// Get nspawn arguments
 	args, err := driverConfig.ConfigArray()
 	if err != nil {
 		d.logger.Error("Error generating machine config", "error", err)
