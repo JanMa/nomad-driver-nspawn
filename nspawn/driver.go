@@ -342,6 +342,11 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	}
 
+	// Validate config
+	if err := driverConfig.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("failed to validate task config: %v", err)
+	}
+
 	// Download image
 	if driverConfig.ImageDownload != nil {
 		d.eventer.EmitEvent(&drivers.TaskEvent{
@@ -371,11 +376,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	driverConfig.imagePath = imagePath
-
-	// Validate config
-	if err := driverConfig.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("failed to validate task config: %v", err)
-	}
 
 	// Get nspawn arguments
 	args, err := driverConfig.ConfigArray()

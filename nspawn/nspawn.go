@@ -216,6 +216,19 @@ func (c *MachineConfig) Validate() error {
 		return fmt.Errorf("starting a container from the root directory is not supported. Use ephemeral or volatile")
 	}
 
+	if c.ImageDownload != nil {
+		switch c.ImageDownload.Type {
+		case "raw", "tar":
+		default:
+			return fmt.Errorf("invalid parameter for image_download.type")
+		}
+		switch c.ImageDownload.Verify {
+		case "no", "checksum", "signature":
+		default:
+			return fmt.Errorf("invalid parameter for image_download.verify")
+		}
+	}
+
 	return nil
 }
 
