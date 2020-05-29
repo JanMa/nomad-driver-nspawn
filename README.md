@@ -75,12 +75,17 @@ should cover a broad range of use cases:
 * [`console`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--console=MODE) -
   (Optional) Configures how to set up standard input, output and error output
   for the container.
-* `image` - Path to the image to be used in the container. This can either be a
-  [directory](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#-D)
-  or the path to a file system
+* `image` - The image to be used in the container. This can either be the path
+  to a
+  [directory](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#-D),
+  the path to a file system
   [image](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#-i)
-  or block device. Can be specified as a relative path from the configured Nomad
-  plugin directory. **This option is mandatory**.
+  or block device or the name of an image registered with
+  [`systemd-machined`](https://www.freedesktop.org/software/systemd/man/systemd-machined.service.html).
+  A path can be specified as a relative path from the configured Nomad plugin
+  directory. **This option is mandatory**.
+* `image_download` - (Optional) Download the used image according to the
+  settings defined in this block. Structure is documented below.
 * [`pivot_root`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--pivot-root=) -
   (Optional) Pivot the specified directory to the be containers root directory.
 * [`resolv_conf`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--resolv-conf=) -
@@ -136,8 +141,18 @@ should cover a broad range of use cases:
   }
   ```
 
+The `image_download` block supports the following arguments:
+* `url` - The URL of the image to download. The URL must be of type `http://` or
+  `https://`. **This option is mandatory**.
+* [`verify`](https://www.freedesktop.org/software/systemd/man/machinectl.html#pull-tar%20URL%20%5BNAME%5D) -
+  (Optional) `no` (default), `signature` or `checksum`. Whether to verify the
+  image before making it available.
+* `force` - (Optional) `true` or `false` (default) If a local copy already
+  exists, delete it first and replace it by the newly downloaded image.
+* `type` - (Optional) `tar` (default) or `raw`. The type of image to download.
+
 ## TODO
-- [ ] download images via `machinectl`
+- [x] download images via `machinectl`
 - [ ] support network modes
 - [x] support exec commands
 - [x] bind task directories in container
