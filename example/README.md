@@ -29,10 +29,22 @@ to run the job.
 
 ## Nginx
 
-This folder contains a simple job file to start a container with a Bash script running as process two.
-The script will setup DHCP and then start Nginx. The containers port `80` will be forwarded to port `8080` on the host.
-To run the job, build the image as described above, start Nomad in development mode and then run:
+This folder contains a simple job file to start a container with a Bash script
+running as process two. The script will setup DHCP and then start Nginx. The
+containers port `80` will be forwarded to port `8080` on the host. To run the
+job, build the image as described above, start Nomad in development mode and
+then run:
 
 ```shell
 $ nomad run nginx.hcl
+```
+
+## image-download
+
+This folder contains basically the same job file as the `Debian` folder but
+downloads the used image from [nspawn.org](https://nspawn.org). To run the job,
+simply execute:
+
+```shell
+$ nomad run debian.hcl
 ```
