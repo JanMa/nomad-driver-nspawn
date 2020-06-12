@@ -357,17 +357,15 @@ func (d *DeviceConfig) Copy() *DeviceConfig {
 }
 
 type MountConfig struct {
-	TaskPath        string
-	HostPath        string
-	Readonly        bool
-	PropagationMode string
+	TaskPath string
+	HostPath string
+	Readonly bool
 }
 
 func (m *MountConfig) IsEqual(o *MountConfig) bool {
 	return m.TaskPath == o.TaskPath &&
 		m.HostPath == o.HostPath &&
-		m.Readonly == o.Readonly &&
-		m.PropagationMode == o.PropagationMode
+		m.Readonly == o.Readonly
 }
 
 func (m *MountConfig) Copy() *MountConfig {
