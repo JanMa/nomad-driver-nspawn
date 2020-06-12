@@ -597,10 +597,6 @@ func (c *ConsulConnect) Validate() error {
 // ConsulSidecarService represents a Consul Connect SidecarService jobspec
 // stanza.
 type ConsulSidecarService struct {
-	// Tags are optional service tags that get registered with the sidecar service
-	// in Consul. If unset, the sidecar service inherits the parent service tags.
-	Tags []string
-
 	// Port is the service's port that the sidecar will connect to. May be
 	// a port label or a literal port number.
 	Port string
@@ -617,7 +613,6 @@ func (s *ConsulSidecarService) HasUpstreams() bool {
 // Copy the stanza recursively. Returns nil if nil.
 func (s *ConsulSidecarService) Copy() *ConsulSidecarService {
 	return &ConsulSidecarService{
-		Tags:  helper.CopySliceString(s.Tags),
 		Port:  s.Port,
 		Proxy: s.Proxy.Copy(),
 	}
@@ -630,10 +625,6 @@ func (s *ConsulSidecarService) Equals(o *ConsulSidecarService) bool {
 	}
 
 	if s.Port != o.Port {
-		return false
-	}
-
-	if !helper.CompareSliceSetString(s.Tags, o.Tags) {
 		return false
 	}
 
