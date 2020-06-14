@@ -9,7 +9,7 @@ require (
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/appc/spec v0.8.11 // indirect
 	github.com/checkpoint-restore/go-criu v0.0.0-20191125063657-fcdcd07065c5 // indirect
-	github.com/containerd/cgroups v0.0.0-20190919134610-bf292b21730f
+	github.com/containerd/cgroups v0.0.0-20190919134610-bf292b21730f // indirect
 	github.com/containerd/go-cni v0.0.0-20191121212822-60d125212faf // indirect
 	github.com/containernetworking/plugins v0.8.3 // indirect
 	github.com/coreos/go-iptables v0.4.3
@@ -37,7 +37,7 @@ require (
 	github.com/moby/moby v1.13.1 // indirect
 	github.com/mrunalp/fileutils v0.0.0-20171103030105-7d4729fb3618 // indirect
 	github.com/opencontainers/runc v1.0.0-rc8.0.20190611121236-6cc515888830 // indirect
-	github.com/opencontainers/runtime-spec v0.1.2-0.20190507144316-5b71a03e2700
+	github.com/opencontainers/runtime-spec v0.1.2-0.20190507144316-5b71a03e2700 // indirect
 	github.com/opencontainers/selinux v1.3.1 // indirect
 	github.com/seccomp/libseccomp-golang v0.9.1 // indirect
 	github.com/shirou/gopsutil v2.19.11+incompatible // indirect

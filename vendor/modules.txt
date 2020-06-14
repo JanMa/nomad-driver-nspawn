@@ -22,8 +22,6 @@ github.com/armon/go-metrics
 github.com/checkpoint-restore/go-criu/rpc
 # github.com/containerd/cgroups v0.0.0-20190919134610-bf292b21730f
 ## explicit
-github.com/containerd/cgroups
-github.com/containerd/cgroups/stats/v1
 # github.com/containerd/console v0.0.0-20180822173158-c12b1e7919c1
 github.com/containerd/console
 # github.com/containerd/go-cni v0.0.0-20191121212822-60d125212faf
@@ -70,10 +68,6 @@ github.com/go-ole/go-ole/oleutil
 # github.com/godbus/dbus v0.0.0-20190422162347-ade71ed3457e
 ## explicit
 github.com/godbus/dbus
-# github.com/gogo/protobuf v1.2.1
-github.com/gogo/protobuf/gogoproto
-github.com/gogo/protobuf/proto
-github.com/gogo/protobuf/protoc-gen-gogo/descriptor
 # github.com/golang/protobuf v1.3.2
 github.com/golang/protobuf/proto
 github.com/golang/protobuf/ptypes
