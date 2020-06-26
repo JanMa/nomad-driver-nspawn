@@ -25,7 +25,7 @@ require (
 	github.com/fsouza/go-dockerclient v1.6.0 // indirect
 	github.com/godbus/dbus v0.0.0-20190422162347-ade71ed3457e
 	github.com/hashicorp/consul v1.6.2 // indirect
-	github.com/hashicorp/consul-template v0.23.0 // indirect
+	github.com/hashicorp/consul-template v0.23.0
 	github.com/hashicorp/go-envparse v0.0.0-20190703193109-150b3a2a4611 // indirect
 	github.com/hashicorp/go-getter v1.4.0 // indirect
 	github.com/hashicorp/go-hclog v0.10.0
