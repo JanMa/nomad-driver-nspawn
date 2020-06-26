@@ -3,25 +3,20 @@ package nspawn
 import (
 	"context"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
-	"os/exec"
-	"syscall"
+	"path/filepath"
+	"strconv"
 	"time"
 
-	"github.com/containerd/cgroups"
+	"github.com/hashicorp/consul-template/signals"
 	hclog "github.com/hashicorp/go-hclog"
-	"github.com/hashicorp/nomad/client/lib/fifo"
-	"github.com/hashicorp/nomad/client/stats"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
-	// "github.com/hashicorp/nomad/drivers/shared/executor"
+	"github.com/hashicorp/nomad/drivers/shared/executor"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	driversUtil "github.com/hashicorp/nomad/plugins/drivers/utils"
 	"github.com/hashicorp/nomad/plugins/shared/hclspec"
 	pstructs "github.com/hashicorp/nomad/plugins/shared/structs"
-	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 const (
@@ -153,9 +148,10 @@ type Config struct {
 // StartTask. This information is needed to rebuild the task state and handler
 // during recovery.
 type TaskState struct {
-	TaskConfig  *drivers.TaskConfig
-	MachineName string
-	StartedAt   time.Time
+	ReattachConfig *pstructs.ReattachConfig
+	TaskConfig     *drivers.TaskConfig
+	MachineName    string
+	StartedAt      time.Time
 }
 
 // NewNspawnDriver returns a new nspawn driver object
@@ -228,6 +224,7 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 }
 
 func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
+	d.logger.Debug("RecoverTask called")
 	if handle == nil {
 		return fmt.Errorf("error: handle cannot be nil")
 	}
@@ -241,29 +238,36 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
+	var driverConfig drivers.TaskConfig
+	if err := taskState.TaskConfig.DecodeDriverConfig(&driverConfig); err != nil {
+		return fmt.Errorf("failed to decode driver config: %v", err)
+	}
+
+	plugRC, err := pstructs.ReattachConfigToGoPlugin(taskState.ReattachConfig)
+	if err != nil {
+		return fmt.Errorf("failed to build ReattachConfig from taskConfig state: %v", err)
+	}
+
+	execImpl, pluginClient, err := executor.ReattachToExecutor(plugRC, d.logger)
+	if err != nil {
+		return fmt.Errorf("failed to reattach to executor: %v", err)
+	}
+
 	p, e := DescribeMachine(taskState.MachineName, machinePropertiesTimeout)
 	if e != nil {
 		d.logger.Error("failed to get machine information", "error", e)
 		return e
-	}
-	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
-	if err != nil {
-		d.logger.Error("failed to get container cgroup", "error", err)
-		return err
 	}
 
 	h := &taskHandle{
 		machine: p,
 		logger:  d.logger,
 
-		totalCpuStats:  stats.NewCpuStats(),
-		userCpuStats:   stats.NewCpuStats(),
-		systemCpuStats: stats.NewCpuStats(),
-
-		cgroup:     control,
-		taskConfig: taskState.TaskConfig,
-		procState:  drivers.TaskStateRunning,
-		startedAt:  taskState.StartedAt,
+		exec:         execImpl,
+		pluginClient: pluginClient,
+		taskConfig:   taskState.TaskConfig,
+		procState:    drivers.TaskStateRunning,
+		startedAt:    taskState.StartedAt,
 	}
 
 	d.tasks.Set(taskState.TaskConfig.ID, h)
@@ -274,6 +278,7 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 }
 
 func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
+	d.logger.Debug("StartTask called")
 	if _, ok := d.tasks.Get(cfg.ID); ok {
 		return nil, nil, fmt.Errorf("task with ID %q already started", cfg.ID)
 	}
@@ -306,6 +311,11 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	driverConfig.Bind[taskDirs.SharedAllocDir] = cfg.Env["NOMAD_ALLOC_DIR"]
 	driverConfig.Bind[taskDirs.LocalDir] = cfg.Env["NOMAD_TASK_DIR"]
 	driverConfig.Bind[taskDirs.SecretsDir] = cfg.Env["NOMAD_SECRETS_DIR"]
+
+	if driverConfig.Properties == nil {
+		driverConfig.Properties = make(MapStrStr)
+	}
+	driverConfig.Properties["MemoryMax"] = strconv.Itoa(int(cfg.Resources.LinuxResources.MemoryLimitBytes))
 
 	// Setup port mapping and exposed ports
 	if len(cfg.Resources.NomadResources.Networks) == 0 {
@@ -395,49 +405,42 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	d.logger.Debug("resources", "nomad", fmt.Sprintf("%+v", cfg.Resources.NomadResources), "linux", fmt.Sprintf("%+v", cfg.Resources.LinuxResources))
 	d.logger.Info("commad arguments", "args", args)
 
-	cmd := exec.Command("systemd-nspawn", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
-	var stdout io.WriteCloser
-	var stderr io.WriteCloser
-
-	if cfg.StdoutPath != "" {
-		f, err := fifo.OpenWriter(cfg.StdoutPath)
-		if err != nil {
-			d.logger.Error("failed to create stdout", "error", err)
-		}
-		stdout = f
+	executorConfig := &executor.ExecutorConfig{
+		LogFile:  filepath.Join(cfg.TaskDir().Dir, "executor.out"),
+		LogLevel: "debug",
 	}
 
-	if stdout != nil {
-		cmd.Stdout = stdout
-	}
+	exec, pluginClient, err := executor.CreateExecutor(d.logger, d.nomadConfig, executorConfig)
 
-	if cfg.StderrPath != "" {
-		f, err := fifo.OpenWriter(cfg.StderrPath)
-		if err != nil {
-			d.logger.Error("failed to create stderr", "error", err)
-		}
-		stderr = f
-	}
-
-	if stderr != nil {
-		cmd.Stderr = stderr
-	}
-
-	err = cmd.Start()
-	defer cmd.Process.Release()
 	if err != nil {
-		d.logger.Error("failed to start task, error starting container", "error", err)
-		return nil, nil, fmt.Errorf("failed to start task: %v", err)
+		return nil, nil, fmt.Errorf("failed to create executor: %v", err)
+	}
+
+	execCmd := &executor.ExecCommand{
+		Cmd:        "systemd-nspawn",
+		Args:       args,
+		StdoutPath: cfg.StdoutPath,
+		StderrPath: cfg.StderrPath,
+		Resources:  cfg.Resources,
+	}
+
+	_, err = exec.Launch(execCmd)
+	if err != nil {
+		pluginClient.Kill()
+		return nil, nil, fmt.Errorf("failed to launch command with executor: %v", err)
 	}
 
 	// wait for boot
 	p, err := DescribeMachine(driverConfig.Machine, machinePropertiesTimeout)
 	if err != nil {
 		d.logger.Error("failed to get machine information", "error", err)
-		shutdown(driverConfig.Machine, 5*time.Second, d.logger)
+		if !pluginClient.Exited() {
+			if err := exec.Shutdown("", 0); err != nil {
+				d.logger.Error("destroying executor failed", "err", err)
+			}
+
+			pluginClient.Kill()
+		}
 		return nil, nil, err
 	}
 	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
@@ -445,7 +448,13 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	addr, err := MachineAddresses(driverConfig.Machine, machineAddressTimeout)
 	if err != nil {
 		d.logger.Error("failed to get machine addresses", "error", err, "addresses", addr)
-		shutdown(driverConfig.Machine, 5*time.Second, d.logger)
+		if !pluginClient.Exited() {
+			if err := exec.Shutdown("", 0); err != nil {
+				d.logger.Error("destroying executor failed", "err", err)
+			}
+
+			pluginClient.Kill()
+		}
 		return nil, nil, err
 	}
 
@@ -454,25 +463,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		PortMap:       driverConfig.PortMap,
 		IP:            addr.IPv4.String(),
 		AutoAdvertise: false,
-	}
-
-	control, err := cgroups.Load(cgroups.Systemd, cgroups.Slice("machine.slice", p.Unit))
-	if err != nil {
-		d.logger.Error("failed to get container cgroup", "error", err)
-		shutdown(driverConfig.Machine, 5*time.Second, d.logger)
-		return nil, nil, err
-	}
-
-	err = control.Update(&specs.LinuxResources{
-		Memory: &specs.LinuxMemory{
-			Limit: &cfg.Resources.LinuxResources.MemoryLimitBytes,
-		},
-	})
-
-	if err != nil {
-		d.logger.Error("failed set container resource limits", "error", err)
-		shutdown(driverConfig.Machine, 5*time.Second, d.logger)
-		return nil, nil, err
 	}
 
 	err = p.ConfigureIPTablesRules(false)
@@ -484,20 +474,18 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		machine: p,
 		logger:  d.logger,
 
-		totalCpuStats:  stats.NewCpuStats(),
-		userCpuStats:   stats.NewCpuStats(),
-		systemCpuStats: stats.NewCpuStats(),
-
-		cgroup:     control,
-		taskConfig: cfg,
-		procState:  drivers.TaskStateRunning,
-		startedAt:  time.Unix(int64(p.Timestamp)/1000000, 0),
+		exec:         exec,
+		pluginClient: pluginClient,
+		taskConfig:   cfg,
+		procState:    drivers.TaskStateRunning,
+		startedAt:    time.Now().Round(time.Millisecond),
 	}
 
 	driverState := TaskState{
-		MachineName: driverConfig.Machine,
-		TaskConfig:  cfg,
-		StartedAt:   h.startedAt,
+		ReattachConfig: pstructs.ReattachConfigFromGoPlugin(pluginClient.ReattachConfig()),
+		MachineName:    driverConfig.Machine,
+		TaskConfig:     cfg,
+		StartedAt:      h.startedAt,
 	}
 
 	if err := handle.SetDriverState(&driverState); err != nil {
@@ -513,6 +501,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 }
 
 func (d *Driver) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {
+	d.logger.Debug("WaitTask called")
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
@@ -526,19 +515,19 @@ func (d *Driver) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.E
 
 func (d *Driver) handleWait(ctx context.Context, handle *taskHandle, ch chan *drivers.ExitResult) {
 	defer close(ch)
+	var result *drivers.ExitResult
 
-	//
-	// Wait for process completion by polling status from handler.
-	// We cannot use the following alternatives:
-	//   * Process.Wait() requires LXC container processes to be children
-	//     of self process; but LXC runs container in separate PID hierarchy
-	//     owned by PID 1.
-	//   * lxc.Container.Wait() holds a write lock on container and prevents
-	//     any other calls, including stats.
-	//
-	// Going with simplest approach of polling for handler to mark exit.
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	ps, err := handle.exec.Wait(ctx)
+	if err != nil {
+		result = &drivers.ExitResult{
+			Err: fmt.Errorf("executor: error waiting on process: %v", err),
+		}
+	} else {
+		result = &drivers.ExitResult{
+			ExitCode: ps.ExitCode,
+			Signal:   ps.Signal,
+		}
+	}
 
 	for {
 		select {
@@ -546,33 +535,34 @@ func (d *Driver) handleWait(ctx context.Context, handle *taskHandle, ch chan *dr
 			return
 		case <-d.ctx.Done():
 			return
-		case <-ticker.C:
-			s := handle.TaskStatus()
-			if s.State == drivers.TaskStateExited {
-				ch <- handle.exitResult
-			}
+		case ch <- result:
 		}
 	}
 }
 
 func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) error {
+	d.logger.Debug("StopTask called")
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
 	}
 
 	if err := handle.machine.ConfigureIPTablesRules(true); err != nil {
-		d.logger.Error("Failed to remove IPTables rules", "error", err)
+		d.logger.Error("StopTask: Failed to remove IPTables rules", "error", err)
 	}
 
-	if err := handle.shutdown(timeout); err != nil {
-		return fmt.Errorf("executor shutdown failed: %v", err)
+	if err := handle.exec.Shutdown(signal, timeout); err != nil {
+		if handle.pluginClient.Exited() {
+			return nil
+		}
+		return fmt.Errorf("StopTask: executor Shutdown failed: %v", err)
 	}
 
 	return nil
 }
 
 func (d *Driver) DestroyTask(taskID string, force bool) error {
+	d.logger.Debug("DestroyTask called")
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
@@ -582,11 +572,8 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 		return fmt.Errorf("cannot destroy running task")
 	}
 
-	if handle.IsRunning() {
-		// grace period is chosen arbitrary here
-		if err := handle.shutdown(1 * time.Minute); err != nil {
-			handle.logger.Error("failed to destroy executor", "err", err)
-		}
+	if !handle.pluginClient.Exited() {
+		handle.pluginClient.Kill()
 	}
 
 	d.tasks.Delete(taskID)
@@ -594,6 +581,7 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 }
 
 func (d *Driver) InspectTask(taskID string) (*drivers.TaskStatus, error) {
+	d.logger.Debug("InspectTask called")
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
@@ -608,7 +596,7 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 		return nil, drivers.ErrTaskNotFound
 	}
 
-	return handle.stats(ctx, interval)
+	return handle.exec.Stats(ctx, interval)
 }
 
 func (d *Driver) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, error) {
@@ -616,78 +604,82 @@ func (d *Driver) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, err
 }
 
 func (d *Driver) SignalTask(taskID string, signal string) error {
+	d.logger.Debug("SignalTask called")
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return drivers.ErrTaskNotFound
 	}
-	err := exec.Command("machinectl", "kill", handle.machine.Name, "-s", signal).Run()
-	if err != nil {
-		handle.logger.Debug("Failed to signal task", "Error", fmt.Sprintf("%+v", err))
+	sig := os.Interrupt
+	if s, ok := signals.SignalLookup[signal]; ok {
+		sig = s
+	} else {
+		d.logger.Warn("unknown signal to send to task, using SIGINT instead", "signal", signal, "task_id", handle.taskConfig.ID)
+
 	}
-	return err
+	return handle.exec.Signal(sig)
 }
 
-var _ drivers.ExecTaskStreamingDriver = (*Driver)(nil)
+// var _ drivers.ExecTaskStreamingDriver = (*Driver)(nil)
+var _ drivers.ExecTaskStreamingRawDriver = (*Driver)(nil)
 
-func (d *Driver) ExecTaskStreaming(ctx context.Context, taskID string, opts *drivers.ExecOptions) (*drivers.ExitResult, error) {
+func (d *Driver) ExecTaskStreamingRaw(ctx context.Context,
+	taskID string,
+	command []string,
+	tty bool,
+	stream drivers.ExecTaskStream) error {
+
+	if len(command) == 0 {
+		return fmt.Errorf("error cmd must have at least one value")
+	}
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
-		return nil, drivers.ErrTaskNotFound
+		return drivers.ErrTaskNotFound
 	}
 
-	err := execSupported(handle)
-	if err != nil {
-		return nil, err
+	if err := execSupported(handle); err != nil {
+		return err
 	}
 
-	if len(opts.Command) == 0 {
-		return nil, fmt.Errorf("command is required but was empty")
+	cmd := []string{"systemd-run", "--wait", "--service-type=exec",
+		"--collect", "--quiet", "--machine", handle.machine.Name}
+	if tty {
+		cmd = append(cmd, "--pty", "--send-sighup")
+	} else {
+		cmd = append(cmd, "--pipe")
 	}
+	cmd = append(cmd, command...)
 
-	c, e := execCommand(ctx, handle, opts.Command, opts.Stdin, opts.Stdout, opts.Stderr, opts.Tty)
-
-	return &drivers.ExitResult{
-		ExitCode: c,
-		Err:      e,
-	}, nil
+	return handle.exec.ExecStreaming(ctx, cmd, tty, stream)
 }
 
 func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
+	if len(cmd) == 0 {
+		return nil, fmt.Errorf("error cmd must have at least one value")
+	}
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
 		return nil, drivers.ErrTaskNotFound
 	}
 
-	err := execSupported(handle)
+	if err := execSupported(handle); err != nil {
+		return nil, err
+	}
+
+	command := []string{"systemd-run", "--wait", "--service-type=exec",
+		"--collect", "--quiet", "--machine", handle.machine.Name, "--pipe"}
+	command = append(command, cmd...)
+
+	out, exitCode, err := handle.exec.Exec(time.Now().Add(timeout), command[0], command[1:])
 	if err != nil {
 		return nil, err
 	}
 
-	if len(cmd) == 0 {
-		return nil, fmt.Errorf("command is required but was empty")
-	}
-
-	outR, outW, err := os.Pipe()
-	if err != nil {
-		return nil, err
-	}
-
-	errR, errW, err := os.Pipe()
-	if err != nil {
-		return nil, err
-	}
-
-	c, err := execCommand(context.TODO(), handle, cmd, nil, outW, errW, false)
-	if err != nil {
-		return nil, err
-	}
-	result := drivers.ExecTaskResult{}
-	result.Stdout, _ = ioutil.ReadAll(outR)
-	result.Stderr, _ = ioutil.ReadAll(errR)
-	result.ExitResult = &drivers.ExitResult{
-		ExitCode: c,
-	}
-	return &result, nil
+	return &drivers.ExecTaskResult{
+		Stdout: out,
+		ExitResult: &drivers.ExitResult{
+			ExitCode: exitCode,
+		},
+	}, nil
 }
 
 // execSupported checks if container was stared with boot parameter, otherwise
@@ -701,32 +693,6 @@ func execSupported(handle *taskHandle) error {
 		return fmt.Errorf("cannot exec command in task started without boot parameter")
 	}
 	return nil
-}
-
-func execCommand(ctx context.Context, handle *taskHandle, args []string, in io.Reader, out, err io.Writer, tty bool) (int, error) {
-
-	c := exec.CommandContext(ctx, "systemd-run", "--wait", "--service-type=exec",
-		"--collect", "--quiet", "--machine", handle.machine.Name)
-	if tty {
-		c.Args = append(c.Args, "--pty", "--send-sighup")
-	} else {
-		c.Args = append(c.Args, "--pipe")
-	}
-	c.Args = append(c.Args, args...)
-
-	c.Stdin = in
-	c.Stdout = out
-	c.Stderr = err
-
-	handle.logger.Debug("executing command", "args", c.Args)
-	e := c.Start()
-	if e != nil {
-		return c.ProcessState.ExitCode(), e
-	}
-
-	e = c.Wait()
-
-	return c.ProcessState.ExitCode(), e
 }
 
 func (d *Driver) PluginInfo() (*base.PluginInfoResponse, error) {

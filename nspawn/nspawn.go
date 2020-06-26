@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -74,6 +73,7 @@ type MachineConfig struct {
 	Environment      MapStrStr          `codec:"environment"`
 	Port             MapStrStr          `codec:"port"`
 	PortMap          MapStrInt          `codec:"port_map"`
+	Properties       MapStrStr          `codec:"properties"`
 }
 
 type ImageType string
@@ -163,6 +163,9 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	}
 	for _, v := range c.Port {
 		args = append(args, "-p", v)
+	}
+	for k, v := range c.Properties {
+		args = append(args, "--property="+k+"="+v)
 	}
 	if len(c.Command) > 0 {
 		args = append(args, c.Command...)
@@ -399,23 +402,6 @@ func systemdVersion() (string, error) {
 	return verNum, nil
 }
 
-// waitTillStopped blocks and returns true when container stops;
-// returns false with an error message if the container processes cannot be identified.
-func waitTillStopped(m *MachineProps) (bool, error) {
-	ps, err := os.FindProcess(int(m.Leader))
-	if err != nil {
-		return false, err
-	}
-
-	for {
-		if err := ps.Signal(syscall.Signal(0)); err != nil {
-			return true, nil
-		}
-
-		time.Sleep(machineMonitorIntv)
-	}
-}
-
 func setupPrivateSystemBus() (conn *dbus.Conn, err error) {
 	conn, err = dbus.SystemBusPrivate()
 	if err != nil {
@@ -472,46 +458,6 @@ func (s *MapStrStr) CodecDecodeSelf(dec *codec.Decoder) {
 		}
 	}
 	*s = r
-}
-
-func shutdown(name string, timeout time.Duration, logger hclog.Logger) error {
-	cmd := exec.Command("machinectl", "stop", name)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.Error("error shutting down", "error", strings.TrimSpace(string(out)), "machine", name)
-		return err
-	}
-	ticker := time.NewTicker(2 * time.Second)
-	done := make(chan bool)
-	go func() {
-		time.Sleep(timeout - 2*time.Second)
-		done <- true
-	}()
-	for {
-		select {
-		case <-done:
-			ticker.Stop()
-			e := exec.Command("machinectl", "kill", name, "-s", "SIGKILL").Run()
-			if e != nil {
-				logger.Error("error killing machine", "error", e, "machine", name)
-				return fmt.Errorf("failed to kill machine: %+v", e)
-			}
-			_, e = DescribeMachine(name, time.Second)
-			if e == nil {
-				logger.Error("failed to shut down machine in time", "machine", name)
-				return fmt.Errorf("failed to shutdown machine in time")
-			}
-			logger.Debug("shutdown successful", "machine", name)
-			return nil
-		case <-ticker.C:
-			_, e := DescribeMachine(name, time.Second)
-			if e != nil {
-				ticker.Stop()
-				logger.Debug("shutdown successful", "machine", name)
-				return nil
-			}
-		}
-	}
 }
 
 func DescribeImage(name string) (*ImageProps, error) {
