@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     [`systemd-importd`](https://www.freedesktop.org/wiki/Software/systemd/importd/)
     API.
   - Example for downloading images.
+  - Use built-in Nomad executor plugin to manage tasks.
+### Fixed
+  - Stats monitoring of running tasks. CPU and memory usage is now displayed
+    correctly.
 
 ## [0.1.0] - 2020-03-04
 ### Added
