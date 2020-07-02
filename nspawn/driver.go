@@ -108,6 +108,10 @@ var (
 		SendSignals: true,
 		Exec:        true,
 		FSIsolation: drivers.FSIsolationImage,
+		NetIsolationModes: []drivers.NetIsolationMode{
+			drivers.NetIsolationModeHost,
+			drivers.NetIsolationModeGroup,
+		},
 	}
 )
 
@@ -288,13 +292,20 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
+	d.logger.Debug("network_isolation", "type", cfg.NetworkIsolation)
+	//map[Labels:<nil> Mode:group Path:/var/run/netns/95ccd07b-201d-e8db-e8e7-c2384cf0c3fe]
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
 	driverConfig.Machine = cfg.Name + "-" + cfg.AllocID
 	driverConfig.Port = make(map[string]string)
 	//TODO: Ensure we can handle containers without private networking?
-	driverConfig.NetworkVeth = true
+	if cfg.NetworkIsolation == nil {
+		driverConfig.NetworkVeth = true
+	} else {
+		driverConfig.NetworkNamespace = cfg.NetworkIsolation.Path
+		driverConfig.UserNamespacing = false
+	}
 	// pass predefined environment vars
 	if driverConfig.Environment == nil {
 		driverConfig.Environment = make(MapStrStr)

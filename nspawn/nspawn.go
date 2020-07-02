@@ -51,29 +51,30 @@ type MachineAddrs struct {
 }
 
 type MachineConfig struct {
-	Boot             bool               `codec:"boot"`
-	Ephemeral        bool               `codec:"ephemeral"`
-	NetworkVeth      bool               `codec:"network_veth"`
-	ProcessTwo       bool               `codec:"process_two"`
-	ReadOnly         bool               `codec:"read_only"`
-	UserNamespacing  bool               `codec:"user_namespacing"`
-	Command          []string           `codec:"command"`
-	Console          string             `codec:"console"`
-	Image            string             `codec:"image"`
-	ImageDownload    *ImageDownloadOpts `codec:"image_download,omitempty"`
-	imagePath        string             `codec:"-"`
-	Machine          string             `codec:"machine"`
-	PivotRoot        string             `codec:"pivot_root"`
-	ResolvConf       string             `codec:"resolv_conf"`
-	User             string             `codec:"user"`
-	Volatile         string             `codec:"volatile"`
-	WorkingDirectory string             `codec:"working_directory"`
 	Bind             MapStrStr          `codec:"bind"`
 	BindReadOnly     MapStrStr          `codec:"bind_read_only"`
+	Boot             bool               `codec:"boot"`
+	Command          []string           `codec:"command"`
+	Console          string             `codec:"console"`
 	Environment      MapStrStr          `codec:"environment"`
+	Ephemeral        bool               `codec:"ephemeral"`
+	Image            string             `codec:"image"`
+	ImageDownload    *ImageDownloadOpts `codec:"image_download,omitempty"`
+	Machine          string             `codec:"machine"`
+	NetworkNamespace string             `codec:"network_namespace"`
+	NetworkVeth      bool               `codec:"network_veth"`
+	PivotRoot        string             `codec:"pivot_root"`
 	Port             MapStrStr          `codec:"port"`
 	PortMap          MapStrInt          `codec:"port_map"`
+	ProcessTwo       bool               `codec:"process_two"`
 	Properties       MapStrStr          `codec:"properties"`
+	ReadOnly         bool               `codec:"read_only"`
+	ResolvConf       string             `codec:"resolv_conf"`
+	User             string             `codec:"user"`
+	UserNamespacing  bool               `codec:"user_namespacing"`
+	Volatile         string             `codec:"volatile"`
+	WorkingDirectory string             `codec:"working_directory"`
+	imagePath        string             `codec:"-"`
 }
 
 type ImageType string
@@ -121,6 +122,9 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	}
 	if c.NetworkVeth {
 		args = append(args, "--network-veth")
+	}
+	if c.NetworkNamespace != "" {
+		args = append(args, "--network-namespace-path="+c.NetworkNamespace)
 	}
 	if c.ProcessTwo {
 		args = append(args, "--as-pid2")
@@ -277,6 +281,10 @@ func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) 
 }
 
 func (p *MachineProps) ConfigureIPTablesRules(delete bool) error {
+	if len(p.NetworkInterfaces) == 0 {
+		return fmt.Errorf("no network interface configured")
+	}
+
 	t, e := iptables.New()
 	if e != nil {
 		return e
