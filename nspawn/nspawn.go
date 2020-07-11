@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/go-iptables/iptables"
 	systemdDbus "github.com/coreos/go-systemd/dbus"
 	"github.com/coreos/go-systemd/import1"
 	"github.com/coreos/go-systemd/machine1"
@@ -51,29 +50,29 @@ type MachineAddrs struct {
 }
 
 type MachineConfig struct {
-	Boot             bool               `codec:"boot"`
-	Ephemeral        bool               `codec:"ephemeral"`
-	NetworkVeth      bool               `codec:"network_veth"`
-	ProcessTwo       bool               `codec:"process_two"`
-	ReadOnly         bool               `codec:"read_only"`
-	UserNamespacing  bool               `codec:"user_namespacing"`
-	Command          []string           `codec:"command"`
-	Console          string             `codec:"console"`
-	Image            string             `codec:"image"`
-	ImageDownload    *ImageDownloadOpts `codec:"image_download,omitempty"`
-	imagePath        string             `codec:"-"`
-	Machine          string             `codec:"machine"`
-	PivotRoot        string             `codec:"pivot_root"`
-	ResolvConf       string             `codec:"resolv_conf"`
-	User             string             `codec:"user"`
-	Volatile         string             `codec:"volatile"`
-	WorkingDirectory string             `codec:"working_directory"`
-	Bind             MapStrStr          `codec:"bind"`
-	BindReadOnly     MapStrStr          `codec:"bind_read_only"`
-	Environment      MapStrStr          `codec:"environment"`
-	Port             MapStrStr          `codec:"port"`
-	PortMap          MapStrInt          `codec:"port_map"`
-	Properties       MapStrStr          `codec:"properties"`
+	Boot                 bool               `codec:"boot"`
+	Ephemeral            bool               `codec:"ephemeral"`
+	ProcessTwo           bool               `codec:"process_two"`
+	ReadOnly             bool               `codec:"read_only"`
+	UserNamespacing      bool               `codec:"user_namespacing"`
+	Command              []string           `codec:"command"`
+	Console              string             `codec:"console"`
+	Image                string             `codec:"image"`
+	ImageDownload        *ImageDownloadOpts `codec:"image_download,omitempty"`
+	imagePath            string             `codec:"-"`
+	Machine              string             `codec:"machine"`
+	PivotRoot            string             `codec:"pivot_root"`
+	ResolvConf           string             `codec:"resolv_conf"`
+	User                 string             `codec:"user"`
+	Volatile             string             `codec:"volatile"`
+	WorkingDirectory     string             `codec:"working_directory"`
+	NetworkNamespacePath string             `codec:"network_namespace_path"`
+	Bind                 MapStrStr          `codec:"bind"`
+	BindReadOnly         MapStrStr          `codec:"bind_read_only"`
+	Environment          MapStrStr          `codec:"environment"`
+	Port                 MapStrStr          `codec:"port"`
+	PortMap              MapStrInt          `codec:"port_map"`
+	Properties           MapStrStr          `codec:"properties"`
 }
 
 type ImageType string
@@ -119,9 +118,6 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	if c.Ephemeral {
 		args = append(args, "--ephemeral")
 	}
-	if c.NetworkVeth {
-		args = append(args, "--network-veth")
-	}
 	if c.ProcessTwo {
 		args = append(args, "--as-pid2")
 	}
@@ -151,6 +147,9 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	}
 	if c.WorkingDirectory != "" {
 		args = append(args, "--chdir", c.WorkingDirectory)
+	}
+	if c.NetworkNamespacePath != "" {
+		args = append(args, "--network-namespace-path", c.NetworkNamespacePath)
 	}
 	for k, v := range c.Bind {
 		args = append(args, "--bind", k+":"+v)
@@ -274,42 +273,6 @@ func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) 
 			}
 		}
 	}
-}
-
-func (p *MachineProps) ConfigureIPTablesRules(delete bool) error {
-	t, e := iptables.New()
-	if e != nil {
-		return e
-	}
-
-	iFace, e := net.InterfaceByIndex(int(p.NetworkInterfaces[0]))
-	if e != nil {
-		return e
-	}
-
-	rules := [][]string{[]string{"-o", iFace.Name, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		[]string{"-i", iFace.Name, "!", "-o", iFace.Name, "-j", "ACCEPT"},
-		[]string{"-i", iFace.Name, "-o", iFace.Name, "-j", "ACCEPT"},
-	}
-
-	for _, r := range rules {
-		switch ok, err := t.Exists("filter", "FORWARD", r...); {
-		case err == nil && !ok:
-			e := t.Append("filter", "FORWARD", r...)
-			if e != nil {
-				return e
-			}
-		case err == nil && ok && delete:
-			e := t.Delete("filter", "FORWARD", r...)
-			if e != nil {
-				return e
-			}
-		case err != nil:
-			return err
-		}
-	}
-
-	return nil
 }
 
 func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error) {

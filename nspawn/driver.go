@@ -108,6 +108,10 @@ var (
 		SendSignals: true,
 		Exec:        true,
 		FSIsolation: drivers.FSIsolationImage,
+		NetIsolationModes: []drivers.NetIsolationMode{
+			drivers.NetIsolationModeHost,
+			drivers.NetIsolationModeGroup,
+		},
 	}
 )
 
@@ -294,7 +298,10 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	driverConfig.Machine = cfg.Name + "-" + cfg.AllocID
 	driverConfig.Port = make(map[string]string)
 	//TODO: Ensure we can handle containers without private networking?
-	driverConfig.NetworkVeth = true
+
+	if cfg.NetworkIsolation != nil {
+		driverConfig.NetworkNamespacePath = cfg.NetworkIsolation.Path
+	}
 	// pass predefined environment vars
 	if driverConfig.Environment == nil {
 		driverConfig.Environment = make(MapStrStr)
@@ -465,11 +472,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		AutoAdvertise: false,
 	}
 
-	err = p.ConfigureIPTablesRules(false)
-	if err != nil {
-		d.logger.Error("Failed to set up IPTables rules", "error", err)
-	}
-
 	h := &taskHandle{
 		machine: p,
 		logger:  d.logger,
@@ -546,11 +548,6 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	if !ok {
 		return drivers.ErrTaskNotFound
 	}
-
-	if err := handle.machine.ConfigureIPTablesRules(true); err != nil {
-		d.logger.Error("StopTask: Failed to remove IPTables rules", "error", err)
-	}
-
 	if err := handle.exec.Shutdown(signal, timeout); err != nil {
 		if handle.pluginClient.Exited() {
 			return nil
