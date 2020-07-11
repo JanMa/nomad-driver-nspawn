@@ -2,7 +2,6 @@ package nspawn
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"time"
 
@@ -18,9 +17,14 @@ var (
 	NspawnMeasuredMemStats = []string{"RSS", "Cache"}
 )
 
+const (
+// startup timeouts
+// machinePropertiesTimeout = 30 * time.Second
+)
+
 type taskHandle struct {
-	machine *MachineProps
-	logger  hclog.Logger
+	machineName string
+	logger      hclog.Logger
 
 	// stateLock syncs access to all fields below
 	stateLock sync.RWMutex
@@ -34,6 +38,17 @@ type taskHandle struct {
 	exitResult   *drivers.ExitResult
 }
 
+/*func (h *taskHandle) DescribeMachine() (*MachineProps, error) {
+  if h.machine == nil {
+    machine, err := DescribeMachine(h.machineName, machinePropertiesTimeout)
+    if err == nil {
+      h.machine = machine
+    } else {
+      return nil, err
+    }
+  }
+  return h.machine, nil
+}*/
 func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
 	h.stateLock.RLock()
 	defer h.stateLock.RUnlock()
@@ -45,9 +60,10 @@ func (h *taskHandle) TaskStatus() *drivers.TaskStatus {
 		StartedAt:   h.startedAt,
 		CompletedAt: h.completedAt,
 		ExitResult:  h.exitResult,
-		DriverAttributes: map[string]string{
-			"pid": strconv.FormatUint(uint64(h.machine.Leader), 10),
-		},
+		// TODO: Maybe return machine config later
+		// DriverAttributes: map[string]string{
+		//	"pid": strconv.FormatUint(uint64(h.machine.Leader), 10),
+		// },
 	}
 }
 

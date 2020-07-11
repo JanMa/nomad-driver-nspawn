@@ -256,16 +256,15 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 		return fmt.Errorf("failed to reattach to executor: %v", err)
 	}
 
-	p, e := DescribeMachine(taskState.MachineName, machinePropertiesTimeout)
-	if e != nil {
-		d.logger.Error("failed to get machine information", "error", e)
-		return e
-	}
+	/*p, e := DescribeMachine(taskState.MachineName, machinePropertiesTimeout)
+	  if e != nil {
+	    d.logger.Error("failed to get machine information", "error", e)
+	    return e
+	  }*/
 
 	h := &taskHandle{
-		machine: p,
-		logger:  d.logger,
-
+		logger:       d.logger,
+		machineName:  taskState.MachineName,
 		exec:         execImpl,
 		pluginClient: pluginClient,
 		taskConfig:   taskState.TaskConfig,
@@ -394,23 +393,24 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	// wait for boot
-	p, err := DescribeMachine(driverConfig.Machine, machinePropertiesTimeout)
-	if err != nil {
-		d.logger.Error("failed to get machine information", "error", err)
-		if !pluginClient.Exited() {
-			if err := exec.Shutdown("", 0); err != nil {
-				d.logger.Error("destroying executor failed", "err", err)
-			}
+	/*p, err := DescribeMachine(driverConfig.Machine, machinePropertiesTimeout)
+	  if err != nil {
+	    d.logger.Error("failed to get machine information", "error", err)
+	    if !pluginClient.Exited() {
+	      if err := exec.Shutdown("", 0); err != nil {
+	        d.logger.Error("destroying executor failed", "err", err)
+	      }
 
-			pluginClient.Kill()
-		}
-		return nil, nil, err
-	}
-	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
+	      pluginClient.Kill()
+	    }
+	    return nil, nil, err
+	  }
+	  d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
+	*/
 
 	h := &taskHandle{
-		machine: p,
-		logger:  d.logger,
+		machineName: driverConfig.Machine,
+		logger:      d.logger,
 
 		exec:         exec,
 		pluginClient: pluginClient,
@@ -574,7 +574,7 @@ func (d *Driver) ExecTaskStreamingRaw(ctx context.Context,
 	}
 
 	cmd := []string{"systemd-run", "--wait", "--service-type=exec",
-		"--collect", "--quiet", "--machine", handle.machine.Name}
+		"--collect", "--quiet", "--machine", handle.machineName}
 	if tty {
 		cmd = append(cmd, "--pty", "--send-sighup")
 	} else {
@@ -599,7 +599,7 @@ func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*
 	}
 
 	command := []string{"systemd-run", "--wait", "--service-type=exec",
-		"--collect", "--quiet", "--machine", handle.machine.Name, "--pipe"}
+		"--collect", "--quiet", "--machine", handle.machineName, "--pipe"}
 	command = append(command, cmd...)
 
 	out, exitCode, err := handle.exec.Exec(time.Now().Add(timeout), command[0], command[1:])
