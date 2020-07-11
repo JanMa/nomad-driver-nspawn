@@ -32,7 +32,6 @@ const (
 
 	// startup timeouts
 	machinePropertiesTimeout = 30 * time.Second
-	machineAddressTimeout    = 30 * time.Second
 )
 
 var (
@@ -296,7 +295,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	handle.Config = cfg
 
 	driverConfig.Machine = cfg.Name + "-" + cfg.AllocID
-	driverConfig.Port = make(map[string]string)
 	//TODO: Ensure we can handle containers without private networking?
 
 	if cfg.NetworkIsolation != nil {
@@ -323,48 +321,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		driverConfig.Properties = make(MapStrStr)
 	}
 	driverConfig.Properties["MemoryMax"] = strconv.Itoa(int(cfg.Resources.LinuxResources.MemoryLimitBytes))
-
-	// Setup port mapping and exposed ports
-	if len(cfg.Resources.NomadResources.Networks) == 0 {
-		d.logger.Debug("no network interfaces are available")
-		if len(driverConfig.PortMap) > 0 {
-			d.logger.Error("Trying to map ports but no network interface is available")
-		}
-	} else {
-		network := cfg.Resources.NomadResources.Networks[0]
-		for _, port := range network.ReservedPorts {
-			// By default we will map the allocated port 1:1 to the container
-			machinePort := port.Value
-
-			// If the user has mapped a port using port_map we'll change it here
-			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
-				machinePort = mapped
-			}
-
-			hostPort := port.Value
-			driverConfig.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
-
-			d.logger.Debug("allocated static port", "ip", network.IP, "port", hostPort)
-			d.logger.Debug("exposed port", "port", machinePort)
-		}
-
-		for _, port := range network.DynamicPorts {
-			// By default we will map the allocated port 1:1 to the container
-			machinePort := port.Value
-
-			// If the user has mapped a port using port_map we'll change it here
-			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
-				machinePort = mapped
-			}
-
-			hostPort := port.Value
-			driverConfig.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
-
-			d.logger.Debug("allocated mapped port", "ip", network.IP, "port", hostPort)
-			d.logger.Debug("exposed port", "port", machinePort)
-		}
-
-	}
 
 	// Validate config
 	if err := driverConfig.Validate(); err != nil {
@@ -452,26 +408,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
 
-	addr, err := MachineAddresses(driverConfig.Machine, machineAddressTimeout)
-	if err != nil {
-		d.logger.Error("failed to get machine addresses", "error", err, "addresses", addr)
-		if !pluginClient.Exited() {
-			if err := exec.Shutdown("", 0); err != nil {
-				d.logger.Error("destroying executor failed", "err", err)
-			}
-
-			pluginClient.Kill()
-		}
-		return nil, nil, err
-	}
-
-	d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
-	network := &drivers.DriverNetwork{
-		PortMap:       driverConfig.PortMap,
-		IP:            addr.IPv4.String(),
-		AutoAdvertise: false,
-	}
-
 	h := &taskHandle{
 		machine: p,
 		logger:  d.logger,
@@ -499,7 +435,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	go h.run()
 
-	return handle, network, nil
+	return handle, nil, nil
 }
 
 func (d *Driver) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {

@@ -70,8 +70,6 @@ type MachineConfig struct {
 	Bind                 MapStrStr          `codec:"bind"`
 	BindReadOnly         MapStrStr          `codec:"bind_read_only"`
 	Environment          MapStrStr          `codec:"environment"`
-	Port                 MapStrStr          `codec:"port"`
-	PortMap              MapStrInt          `codec:"port_map"`
 	Properties           MapStrStr          `codec:"properties"`
 }
 
@@ -159,9 +157,6 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	}
 	for k, v := range c.Environment {
 		args = append(args, "-E", k+"="+v)
-	}
-	for _, v := range c.Port {
-		args = append(args, "-p", v)
 	}
 	for k, v := range c.Properties {
 		args = append(args, "--property="+k+"="+v)
@@ -273,58 +268,6 @@ func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) 
 			}
 		}
 	}
-}
-
-func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error) {
-	dbusConn, err := setupPrivateSystemBus()
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to dbus: %+v", err)
-	}
-	defer dbusConn.Close()
-
-	obj := dbusConn.Object("org.freedesktop.machine1", dbus.ObjectPath(dbusPath))
-	ticker := time.NewTicker(500 * time.Millisecond)
-	done := make(chan bool)
-	go func() {
-		time.Sleep(timeout)
-		done <- true
-	}()
-
-	var result *dbus.Call
-	for {
-		select {
-		case <-done:
-			ticker.Stop()
-			return nil, fmt.Errorf("timed out while getting machine addresses: %+v", result.Err)
-		case <-ticker.C:
-			result = obj.Call(fmt.Sprintf("%s.%s", dbusInterface, "GetMachineAddresses"), 0, name)
-			if result.Err != nil {
-				return nil, fmt.Errorf("failed to call dbus: %+v", result.Err)
-			}
-
-			addrs := MachineAddrs{}
-
-			for _, v := range result.Body[0].([][]interface{}) {
-				t := v[0].(int32)
-				a := v[1].([]uint8)
-				if t == 2 {
-					ip := net.IP{}
-					for _, o := range a {
-						ip = append(ip, byte(o))
-					}
-					if !ip.IsLinkLocalUnicast() {
-						addrs.IPv4 = ip
-					}
-				}
-			}
-
-			if len(addrs.IPv4) > 0 {
-				ticker.Stop()
-				return &addrs, nil
-			}
-		}
-	}
-
 }
 
 func isInstalled() error {
