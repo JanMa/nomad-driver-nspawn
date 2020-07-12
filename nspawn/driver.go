@@ -292,8 +292,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
-	d.logger.Debug("network_isolation", "type", cfg.NetworkIsolation)
-	//map[Labels:<nil> Mode:group Path:/var/run/netns/95ccd07b-201d-e8db-e8e7-c2384cf0c3fe]
 	handle := drivers.NewTaskHandle(taskHandleVersion)
 	handle.Config = cfg
 
@@ -476,9 +474,11 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		AutoAdvertise: false,
 	}
 
-	err = p.ConfigureIPTablesRules(false)
-	if err != nil {
-		d.logger.Error("Failed to set up IPTables rules", "error", err)
+	if cfg.NetworkIsolation == nil {
+		err = p.ConfigureIPTablesRules(false)
+		if err != nil {
+			d.logger.Error("Failed to set up IPTables rules", "error", err)
+		}
 	}
 
 	h := &taskHandle{
@@ -558,8 +558,10 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 		return drivers.ErrTaskNotFound
 	}
 
-	if err := handle.machine.ConfigureIPTablesRules(true); err != nil {
-		d.logger.Error("StopTask: Failed to remove IPTables rules", "error", err)
+	if handle.taskConfig.NetworkIsolation == nil {
+		if err := handle.machine.ConfigureIPTablesRules(true); err != nil {
+			d.logger.Error("StopTask: Failed to remove IPTables rules", "error", err)
+		}
 	}
 
 	if err := handle.exec.Shutdown(signal, timeout); err != nil {
