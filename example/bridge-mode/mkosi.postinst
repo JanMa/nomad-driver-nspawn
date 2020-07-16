@@ -1,0 +1,10 @@
+#!/bin/sh
+systemctl enable systemd-resolved
+systemctl enable systemd-networkd
+{
+  echo "pts/0"
+  echo "pts/1"
+  echo "pts/2"
+  echo "pts/3"
+  echo "pts/4"
+} >> /etc/securetty

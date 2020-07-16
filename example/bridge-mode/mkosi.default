@@ -1,0 +1,12 @@
+[Distribution]
+Distribution=debian
+Release=stable
+
+[Output]
+Format=directory
+
+[Validation]
+Password=root
+
+[Packages]
+Packages=nginx,iproute2,isc-dhcp-client

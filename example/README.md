@@ -48,3 +48,10 @@ simply execute:
 ```shell
 $ nomad run debian.hcl
 ```
+
+## bridge-mode
+
+This folder contains the same job as the `Nginx` folder but configured to run in
+`bridge` network mode. Make sure to have a look at the [Nomad Consul Connect
+example](https://www.nomadproject.io/docs/integrations/consul-connect#prerequisites)
+and install all necessary prerequisites before running this job.
