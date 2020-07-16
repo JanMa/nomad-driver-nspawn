@@ -55,3 +55,65 @@ This folder contains the same job as the `Nginx` folder but configured to run in
 `bridge` network mode. Make sure to have a look at the [Nomad Consul Connect
 example](https://www.nomadproject.io/docs/integrations/consul-connect#prerequisites)
 and install all necessary prerequisites before running this job.
+
+## consul-connect
+
+This folder contains yet another variant of the `Nginx` job. This time, bridge
+mode is enabled and a `consul-connect` sidecar proxy is registered for the
+service. To run this job, make sure you followed the tutorial linked above. Then
+start Nomad with Consul connect enabled.
+
+```shell
+$ sudo nomad agent -dev-connect
+```
+
+Open another terminal window and also start Consul
+
+```shell
+$ sudo consul -agent -dev
+```
+
+In a third terminal window you can now start the Nomad job via 
+
+```shell
+$ nomad run nginx.hcl
+```
+
+If you want to connect to the service, you will need to start a local Consul
+connect proxy.
+
+```shell
+$ consul connect proxy -upstream 'consul-connect-bridge:8082' -service proxy
+```
+
+Then you can access the service in a fourth terminal window by connecting to the
+proxy.
+
+```shell
+$ curl http://127.0.0.1:8082
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+```
