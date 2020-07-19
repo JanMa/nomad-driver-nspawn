@@ -3,9 +3,11 @@ package nspawn
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/consul-template/signals"
@@ -433,16 +435,48 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		Resources:  cfg.Resources,
 	}
 
-	_, err = exec.Launch(execCmd)
+	ps, err := exec.Launch(execCmd)
 	if err != nil {
 		pluginClient.Kill()
 		return nil, nil, fmt.Errorf("failed to launch command with executor: %v", err)
 	}
 
-	// wait for boot
+	printErr := func() {
+		logDir := cfg.TaskDir().LogDir
+		logs, err := filepath.Glob(filepath.Join(logDir, cfg.Name+"*"))
+		if err != nil {
+			d.logger.Error("error finding log files", err)
+			return
+		}
+
+		for _, l := range logs {
+			out, err := ioutil.ReadFile(l)
+			if err != nil {
+				continue
+			}
+			lines := strings.Split(strings.Trim(string(out), "\n"), "\n")
+			// Continue if there's no output
+			if len(lines) == 0 || len(lines[len(lines)-1]) == 0 {
+				continue
+			}
+			d.logger.Error("systemd-nspawn failed", "file", filepath.Base(l), "out", lines[len(lines)-1])
+			d.eventer.EmitEvent(&drivers.TaskEvent{
+				TaskID:    cfg.ID,
+				AllocID:   cfg.AllocID,
+				TaskName:  cfg.Name,
+				Timestamp: time.Now(),
+				Message:   lines[len(lines)-1],
+				Err:       fmt.Errorf("Systemd-Nspawn failed"),
+			})
+		}
+	}
+
 	p, err := DescribeMachine(driverConfig.Machine, machinePropertiesTimeout)
 	if err != nil {
 		d.logger.Error("failed to get machine information", "error", err)
+		if ps.ExitCode != 0 {
+			printErr()
+		}
 		if !pluginClient.Exited() {
 			if err := exec.Shutdown("", 0); err != nil {
 				d.logger.Error("destroying executor failed", "err", err)
@@ -457,6 +491,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	addr, err := MachineAddresses(driverConfig.Machine, machineAddressTimeout)
 	if err != nil {
 		d.logger.Error("failed to get machine addresses", "error", err, "addresses", addr)
+		if ps.ExitCode != 0 {
+			printErr()
+		}
 		if !pluginClient.Exited() {
 			if err := exec.Shutdown("", 0); err != nil {
 				d.logger.Error("destroying executor failed", "err", err)
