@@ -8,8 +8,8 @@ and their machine ID will be set to the allocation ID of the started Nomad task.
 
 ## Client requirements
 
-* [Nomad](https://nomadproject.io) 0.10+ running as `root`
-* [Go](https://golang.org/doc/install) 1.13+
+* [Nomad](https://nomadproject.io) 0.12+ running as `root`
+* [Go](https://golang.org/doc/install) 1.14+
 * Linux
 * [`systemd-nspawn`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html)
   installed
