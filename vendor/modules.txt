@@ -11,6 +11,10 @@ github.com/Microsoft/go-winio/pkg/guid
 # github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d
 ## explicit
 github.com/StackExchange/wmi
+# github.com/agext/levenshtein v1.2.1
+github.com/agext/levenshtein
+# github.com/apparentlymart/go-textseg v1.0.0
+github.com/apparentlymart/go-textseg/textseg
 # github.com/appc/spec v0.8.11
 ## explicit
 # github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e
@@ -46,6 +50,8 @@ github.com/coreos/go-systemd/util
 # github.com/cyphar/filepath-securejoin v0.2.2
 ## explicit
 github.com/cyphar/filepath-securejoin
+# github.com/davecgh/go-spew v1.1.1
+github.com/davecgh/go-spew/spew
 # github.com/docker/cli v0.0.0-20191202230238-13fb276442f5
 ## explicit
 # github.com/docker/docker v1.13.1
@@ -124,6 +130,10 @@ github.com/hashicorp/hcl/json/scanner
 github.com/hashicorp/hcl/json/token
 # github.com/hashicorp/hcl2 v0.0.0-20191002203319-fb75b3253c80
 ## explicit
+github.com/hashicorp/hcl2/hcl
+github.com/hashicorp/hcl2/hcl/hclsyntax
+github.com/hashicorp/hcl2/hcl/json
+github.com/hashicorp/hcl2/hcldec
 # github.com/hashicorp/nomad v0.10.1
 ## explicit
 github.com/hashicorp/nomad/acl
@@ -138,6 +148,8 @@ github.com/hashicorp/nomad/helper
 github.com/hashicorp/nomad/helper/args
 github.com/hashicorp/nomad/helper/flatmap
 github.com/hashicorp/nomad/helper/pluginutils/grpcutils
+github.com/hashicorp/nomad/helper/pluginutils/hclspecutils
+github.com/hashicorp/nomad/helper/pluginutils/hclutils
 github.com/hashicorp/nomad/helper/stats
 github.com/hashicorp/nomad/helper/uuid
 github.com/hashicorp/nomad/lib/kheap
@@ -182,6 +194,8 @@ github.com/mitchellh/go-homedir
 github.com/mitchellh/go-ps
 # github.com/mitchellh/go-testing-interface v1.0.0
 github.com/mitchellh/go-testing-interface
+# github.com/mitchellh/go-wordwrap v1.0.0
+github.com/mitchellh/go-wordwrap
 # github.com/mitchellh/hashstructure v1.0.0
 github.com/mitchellh/hashstructure
 # github.com/mitchellh/mapstructure v1.1.2
@@ -224,6 +238,8 @@ github.com/opencontainers/selinux/go-selinux
 github.com/opencontainers/selinux/go-selinux/label
 # github.com/pkg/errors v0.8.1
 github.com/pkg/errors
+# github.com/pmezard/go-difflib v1.0.0
+github.com/pmezard/go-difflib/difflib
 # github.com/ryanuber/go-glob v1.0.0
 github.com/ryanuber/go-glob
 # github.com/seccomp/libseccomp-golang v0.9.1
@@ -242,6 +258,9 @@ github.com/shirou/gopsutil/process
 github.com/shirou/w32
 # github.com/sirupsen/logrus v1.4.1
 github.com/sirupsen/logrus
+# github.com/stretchr/testify v1.3.0
+github.com/stretchr/testify/assert
+github.com/stretchr/testify/require
 # github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2
 ## explicit
 github.com/syndtr/gocapability/capability
@@ -262,6 +281,10 @@ github.com/vmihailenco/msgpack/codes
 ## explicit
 github.com/zclconf/go-cty/cty
 github.com/zclconf/go-cty/cty/convert
+github.com/zclconf/go-cty/cty/function
+github.com/zclconf/go-cty/cty/function/stdlib
+github.com/zclconf/go-cty/cty/gocty
+github.com/zclconf/go-cty/cty/json
 github.com/zclconf/go-cty/cty/msgpack
 github.com/zclconf/go-cty/cty/set
 # go4.org v0.0.0-20191010144846-132d2879e1e9

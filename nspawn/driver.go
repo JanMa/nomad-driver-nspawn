@@ -14,6 +14,7 @@ import (
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/drivers/shared/eventer"
 	"github.com/hashicorp/nomad/drivers/shared/executor"
+	"github.com/hashicorp/nomad/helper/pluginutils/hclutils"
 	"github.com/hashicorp/nomad/plugins/base"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	driversUtil "github.com/hashicorp/nomad/plugins/drivers/utils"
@@ -308,7 +309,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 	// pass predefined environment vars
 	if driverConfig.Environment == nil {
-		driverConfig.Environment = make(MapStrStr)
+		driverConfig.Environment = make(hclutils.MapStrStr)
 	}
 	for k, v := range cfg.Env {
 		driverConfig.Environment[k] = v
@@ -317,14 +318,14 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	// bind Task Directories into container
 	taskDirs := cfg.TaskDir()
 	if driverConfig.Bind == nil {
-		driverConfig.Bind = make(MapStrStr)
+		driverConfig.Bind = make(hclutils.MapStrStr)
 	}
 	driverConfig.Bind[taskDirs.SharedAllocDir] = cfg.Env["NOMAD_ALLOC_DIR"]
 	driverConfig.Bind[taskDirs.LocalDir] = cfg.Env["NOMAD_TASK_DIR"]
 	driverConfig.Bind[taskDirs.SecretsDir] = cfg.Env["NOMAD_SECRETS_DIR"]
 
 	if driverConfig.Properties == nil {
-		driverConfig.Properties = make(MapStrStr)
+		driverConfig.Properties = make(hclutils.MapStrStr)
 	}
 	driverConfig.Properties["MemoryMax"] = strconv.Itoa(int(cfg.Resources.LinuxResources.MemoryLimitBytes))
 

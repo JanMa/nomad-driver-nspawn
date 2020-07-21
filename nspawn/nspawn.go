@@ -18,7 +18,7 @@ import (
 	systemdUtil "github.com/coreos/go-systemd/util"
 	"github.com/godbus/dbus"
 	hclog "github.com/hashicorp/go-hclog"
-	"github.com/ugorji/go/codec"
+	"github.com/hashicorp/nomad/helper/pluginutils/hclutils"
 )
 
 const (
@@ -51,12 +51,12 @@ type MachineAddrs struct {
 }
 
 type MachineConfig struct {
-	Bind             MapStrStr          `codec:"bind"`
-	BindReadOnly     MapStrStr          `codec:"bind_read_only"`
+	Bind             hclutils.MapStrStr `codec:"bind"`
+	BindReadOnly     hclutils.MapStrStr `codec:"bind_read_only"`
 	Boot             bool               `codec:"boot"`
 	Command          []string           `codec:"command"`
 	Console          string             `codec:"console"`
-	Environment      MapStrStr          `codec:"environment"`
+	Environment      hclutils.MapStrStr `codec:"environment"`
 	Ephemeral        bool               `codec:"ephemeral"`
 	Image            string             `codec:"image"`
 	ImageDownload    *ImageDownloadOpts `codec:"image_download,omitempty"`
@@ -64,10 +64,10 @@ type MachineConfig struct {
 	NetworkNamespace string             `codec:"network_namespace"`
 	NetworkVeth      bool               `codec:"network_veth"`
 	PivotRoot        string             `codec:"pivot_root"`
-	Port             MapStrStr          `codec:"port"`
-	PortMap          MapStrInt          `codec:"port_map"`
+	Port             hclutils.MapStrStr `codec:"port"`
+	PortMap          hclutils.MapStrInt `codec:"port_map"`
 	ProcessTwo       bool               `codec:"process_two"`
-	Properties       MapStrStr          `codec:"properties"`
+	Properties       hclutils.MapStrStr `codec:"properties"`
 	ReadOnly         bool               `codec:"read_only"`
 	ResolvConf       string             `codec:"resolv_conf"`
 	User             string             `codec:"user"`
@@ -426,46 +426,6 @@ func setupPrivateSystemBus() (conn *dbus.Conn, err error) {
 		conn = nil
 	}
 	return conn, nil
-}
-
-type MapStrInt map[string]int
-
-func (s *MapStrInt) CodecEncodeSelf(enc *codec.Encoder) {
-	v := []map[string]int{*s}
-	enc.MustEncode(v)
-}
-
-func (s *MapStrInt) CodecDecodeSelf(dec *codec.Decoder) {
-	ms := []map[string]int{}
-	dec.MustDecode(&ms)
-
-	r := map[string]int{}
-	for _, m := range ms {
-		for k, v := range m {
-			r[k] = v
-		}
-	}
-	*s = r
-}
-
-type MapStrStr map[string]string
-
-func (s *MapStrStr) CodecEncodeSelf(enc *codec.Encoder) {
-	v := []map[string]string{*s}
-	enc.MustEncode(v)
-}
-
-func (s *MapStrStr) CodecDecodeSelf(dec *codec.Decoder) {
-	ms := []map[string]string{}
-	dec.MustDecode(&ms)
-
-	r := map[string]string{}
-	for _, m := range ms {
-		for k, v := range m {
-			r[k] = v
-		}
-	}
-	*s = r
 }
 
 func DescribeImage(name string) (*ImageProps, error) {
