@@ -53,6 +53,10 @@ var (
 			hclspec.NewAttr("enabled", "bool", false),
 			hclspec.NewLiteral("true"),
 		),
+		"volumes": hclspec.NewDefault(
+			hclspec.NewAttr("volumes", "bool", false),
+			hclspec.NewLiteral("true"),
+		),
 	})
 
 	// taskConfigSpec is the hcl specification for the driver config section of
@@ -115,6 +119,7 @@ var (
 			drivers.NetIsolationModeHost,
 			drivers.NetIsolationModeGroup,
 		},
+		MountConfigs: drivers.MountConfigSupportAll,
 	}
 )
 
@@ -149,6 +154,7 @@ type Driver struct {
 type Config struct {
 	// Enabled is set to true to enable the nspawn driver
 	Enabled bool `codec:"enabled"`
+	Volumes bool `codec:"volumes"`
 }
 
 // TaskState is the state which is encoded in the handle returned in
@@ -218,6 +224,7 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 		desc = "ready"
 		attrs["driver.nspawn"] = pstructs.NewBoolAttribute(true)
 		attrs["driver.nspawn.version"] = pstructs.NewStringAttribute(version)
+		attrs["driver.nspawn.volumes"] = pstructs.NewBoolAttribute(d.config.Volumes)
 	} else {
 		health = drivers.HealthStateUndetected
 		desc = "disabled"
@@ -323,6 +330,24 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	driverConfig.Bind[taskDirs.SharedAllocDir] = cfg.Env["NOMAD_ALLOC_DIR"]
 	driverConfig.Bind[taskDirs.LocalDir] = cfg.Env["NOMAD_TASK_DIR"]
 	driverConfig.Bind[taskDirs.SecretsDir] = cfg.Env["NOMAD_SECRETS_DIR"]
+
+	//bind volumes into container
+	if cfg.Mounts != nil && len(cfg.Mounts) > 0 {
+		if !d.config.Volumes {
+			d.logger.Error("volumes are not enabled; cannot mount host paths")
+			return nil, nil, fmt.Errorf("volumes are not enabled; cannot mount host paths")
+		}
+		if driverConfig.BindReadOnly == nil {
+			driverConfig.BindReadOnly = make(hclutils.MapStrStr)
+		}
+		for _, m := range cfg.Mounts {
+			if m.Readonly {
+				driverConfig.BindReadOnly[m.HostPath] = m.TaskPath
+			} else {
+				driverConfig.Bind[m.HostPath] = m.TaskPath
+			}
+		}
+	}
 
 	if driverConfig.Properties == nil {
 		driverConfig.Properties = make(hclutils.MapStrStr)
