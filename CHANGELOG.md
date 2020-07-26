@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Consul Connect.
   - Output the error why systemd-nspawn fails on startup. It is added to the
     logs and shown in the WebUi.
+  - Support for `volume_mount` stanza. Volumes are enabled by default and can be
+    disabled by setting `volumes = false` inside the driver config.
 ## [0.2.0] - 2020-06-27
 ### Added
   - Support for downloading images via the
