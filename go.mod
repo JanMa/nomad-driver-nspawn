@@ -10,4 +10,5 @@ require (
 	github.com/hashicorp/go-hclog v0.14.1
 	github.com/hashicorp/go-plugin v1.3.0
 	github.com/hashicorp/nomad v0.12.0
+	github.com/stretchr/testify v1.5.1
 )

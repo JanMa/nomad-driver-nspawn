@@ -1,8 +1,13 @@
+# github.com/Azure/go-ansiterm v0.0.0-20170929234023-d6e3b3328b78
+github.com/Azure/go-ansiterm
+github.com/Azure/go-ansiterm/winterm
 # github.com/LK4D4/joincontext v0.0.0-20171026170139-1724345da6d5
 github.com/LK4D4/joincontext
 # github.com/Microsoft/go-winio v0.4.15-0.20200113171025-3fe6c5262873
 github.com/Microsoft/go-winio
 github.com/Microsoft/go-winio/pkg/guid
+# github.com/Microsoft/hcsshim v0.8.8-0.20200312192636-fd0797d766b1
+github.com/Microsoft/hcsshim/osversion
 # github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6
 github.com/StackExchange/wmi
 # github.com/agext/levenshtein v1.2.1
@@ -13,6 +18,41 @@ github.com/apparentlymart/go-textseg/v12/textseg
 github.com/armon/circbuf
 # github.com/armon/go-metrics v0.3.3
 github.com/armon/go-metrics
+# github.com/aws/aws-sdk-go v1.25.41
+github.com/aws/aws-sdk-go/aws
+github.com/aws/aws-sdk-go/aws/awserr
+github.com/aws/aws-sdk-go/aws/awsutil
+github.com/aws/aws-sdk-go/aws/client
+github.com/aws/aws-sdk-go/aws/client/metadata
+github.com/aws/aws-sdk-go/aws/corehandlers
+github.com/aws/aws-sdk-go/aws/credentials
+github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds
+github.com/aws/aws-sdk-go/aws/credentials/endpointcreds
+github.com/aws/aws-sdk-go/aws/credentials/processcreds
+github.com/aws/aws-sdk-go/aws/credentials/stscreds
+github.com/aws/aws-sdk-go/aws/csm
+github.com/aws/aws-sdk-go/aws/defaults
+github.com/aws/aws-sdk-go/aws/ec2metadata
+github.com/aws/aws-sdk-go/aws/endpoints
+github.com/aws/aws-sdk-go/aws/request
+github.com/aws/aws-sdk-go/aws/session
+github.com/aws/aws-sdk-go/aws/signer/v4
+github.com/aws/aws-sdk-go/internal/ini
+github.com/aws/aws-sdk-go/internal/sdkio
+github.com/aws/aws-sdk-go/internal/sdkmath
+github.com/aws/aws-sdk-go/internal/sdkrand
+github.com/aws/aws-sdk-go/internal/sdkuri
+github.com/aws/aws-sdk-go/internal/shareddefaults
+github.com/aws/aws-sdk-go/private/protocol
+github.com/aws/aws-sdk-go/private/protocol/json/jsonutil
+github.com/aws/aws-sdk-go/private/protocol/query
+github.com/aws/aws-sdk-go/private/protocol/query/queryutil
+github.com/aws/aws-sdk-go/private/protocol/rest
+github.com/aws/aws-sdk-go/private/protocol/xml/xmlutil
+github.com/aws/aws-sdk-go/service/sts
+github.com/aws/aws-sdk-go/service/sts/stsiface
+# github.com/boltdb/bolt v1.3.1
+github.com/boltdb/bolt
 # github.com/checkpoint-restore/go-criu v0.0.0-20190109184317-bdb7599cd87b
 github.com/checkpoint-restore/go-criu/rpc
 # github.com/cilium/ebpf v0.0.0-20200617135954-7acf5cc039f4
@@ -25,6 +65,19 @@ github.com/cilium/ebpf/internal/unix
 github.com/container-storage-interface/spec/lib/go/csi
 # github.com/containerd/console v1.0.0
 github.com/containerd/console
+# github.com/containerd/containerd v1.3.2
+github.com/containerd/containerd/errdefs
+# github.com/containerd/continuity v0.0.0-20200228182428-0f16d7a0959c
+github.com/containerd/continuity/fs
+github.com/containerd/continuity/syscallx
+github.com/containerd/continuity/sysx
+# github.com/containernetworking/cni v0.7.2-0.20190612152420-dc953e2fd91f
+github.com/containernetworking/cni/libcni
+github.com/containernetworking/cni/pkg/invoke
+github.com/containernetworking/cni/pkg/types
+github.com/containernetworking/cni/pkg/types/020
+github.com/containernetworking/cni/pkg/types/current
+github.com/containernetworking/cni/pkg/version
 # github.com/containernetworking/plugins v0.7.3-0.20190501191748-2d6d46d308b2
 github.com/containernetworking/plugins/pkg/ns
 # github.com/coreos/go-iptables v0.4.5
@@ -41,18 +94,53 @@ github.com/coreos/go-systemd/util
 github.com/cyphar/filepath-securejoin
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
+# github.com/docker/distribution v2.7.1+incompatible
+github.com/docker/distribution/registry/api/errcode
 # github.com/docker/docker v17.12.0-ce-rc1.0.20200330121334-7f8b4b621b5d+incompatible
+github.com/docker/docker/api/types/blkiodev
+github.com/docker/docker/api/types/container
+github.com/docker/docker/api/types/filters
+github.com/docker/docker/api/types/mount
+github.com/docker/docker/api/types/network
+github.com/docker/docker/api/types/registry
+github.com/docker/docker/api/types/strslice
+github.com/docker/docker/api/types/swarm
+github.com/docker/docker/api/types/swarm/runtime
+github.com/docker/docker/api/types/versions
+github.com/docker/docker/errdefs
+github.com/docker/docker/pkg/archive
+github.com/docker/docker/pkg/fileutils
+github.com/docker/docker/pkg/homedir
+github.com/docker/docker/pkg/idtools
+github.com/docker/docker/pkg/ioutils
+github.com/docker/docker/pkg/jsonmessage
+github.com/docker/docker/pkg/longpath
 github.com/docker/docker/pkg/mount
+github.com/docker/docker/pkg/pools
+github.com/docker/docker/pkg/stdcopy
+github.com/docker/docker/pkg/system
+github.com/docker/docker/pkg/term
+github.com/docker/docker/pkg/term/windows
+# github.com/docker/go-connections v0.4.0
+github.com/docker/go-connections/nat
 # github.com/docker/go-units v0.4.0
 github.com/docker/go-units
+# github.com/docker/libnetwork v0.8.0-dev.2.0.20200612180813-9e99af28df21
+github.com/docker/libnetwork/resolvconf
+github.com/docker/libnetwork/resolvconf/dns
+github.com/docker/libnetwork/types
 # github.com/fatih/color v1.9.0
 github.com/fatih/color
+# github.com/fsouza/go-dockerclient v1.6.5
+github.com/fsouza/go-dockerclient
 # github.com/go-ole/go-ole v1.2.1
 github.com/go-ole/go-ole
 github.com/go-ole/go-ole/oleutil
 # github.com/godbus/dbus v5.0.1+incompatible
 ## explicit
 github.com/godbus/dbus
+# github.com/gogo/protobuf v1.3.1
+github.com/gogo/protobuf/proto
 # github.com/golang/protobuf v1.3.4
 github.com/golang/protobuf/proto
 github.com/golang/protobuf/protoc-gen-go/descriptor
@@ -62,6 +150,8 @@ github.com/golang/protobuf/ptypes/duration
 github.com/golang/protobuf/ptypes/empty
 github.com/golang/protobuf/ptypes/timestamp
 github.com/golang/protobuf/ptypes/wrappers
+# github.com/golang/snappy v0.0.1
+github.com/golang/snappy
 # github.com/grpc-ecosystem/go-grpc-middleware v1.2.1-0.20200228141219-3ce3d519df39
 github.com/grpc-ecosystem/go-grpc-middleware/retry
 github.com/grpc-ecosystem/go-grpc-middleware/util/backoffutils
@@ -90,10 +180,13 @@ github.com/hashicorp/go-multierror
 ## explicit
 github.com/hashicorp/go-plugin
 github.com/hashicorp/go-plugin/internal/plugin
+# github.com/hashicorp/go-retryablehttp v0.5.4
+github.com/hashicorp/go-retryablehttp
 # github.com/hashicorp/go-rootcerts v1.0.2
 github.com/hashicorp/go-rootcerts
 # github.com/hashicorp/go-sockaddr v1.0.2
 github.com/hashicorp/go-sockaddr
+github.com/hashicorp/go-sockaddr/template
 # github.com/hashicorp/go-version v1.2.1-0.20191009193637-2046c9d0f0b0
 github.com/hashicorp/go-version
 # github.com/hashicorp/golang-lru v0.5.4
@@ -119,12 +212,23 @@ github.com/hashicorp/hcl/v2/json
 ## explicit
 github.com/hashicorp/nomad/acl
 github.com/hashicorp/nomad/client/allocdir
+github.com/hashicorp/nomad/client/allocrunner/taskrunner/state
+github.com/hashicorp/nomad/client/config
+github.com/hashicorp/nomad/client/devicemanager/state
 github.com/hashicorp/nomad/client/dynamicplugins
+github.com/hashicorp/nomad/client/fingerprint
 github.com/hashicorp/nomad/client/lib/fifo
+github.com/hashicorp/nomad/client/logmon
+github.com/hashicorp/nomad/client/logmon/logging
+github.com/hashicorp/nomad/client/logmon/proto
 github.com/hashicorp/nomad/client/pluginmanager
 github.com/hashicorp/nomad/client/pluginmanager/csimanager
+github.com/hashicorp/nomad/client/pluginmanager/drivermanager/state
+github.com/hashicorp/nomad/client/state
 github.com/hashicorp/nomad/client/stats
 github.com/hashicorp/nomad/client/structs
+github.com/hashicorp/nomad/client/taskenv
+github.com/hashicorp/nomad/client/testutil
 github.com/hashicorp/nomad/command/agent/host
 github.com/hashicorp/nomad/command/agent/pprof
 github.com/hashicorp/nomad/drivers/shared/eventer
@@ -132,17 +236,25 @@ github.com/hashicorp/nomad/drivers/shared/executor
 github.com/hashicorp/nomad/drivers/shared/executor/proto
 github.com/hashicorp/nomad/helper
 github.com/hashicorp/nomad/helper/args
+github.com/hashicorp/nomad/helper/boltdd
 github.com/hashicorp/nomad/helper/constraints/semver
+github.com/hashicorp/nomad/helper/discover
 github.com/hashicorp/nomad/helper/flatmap
+github.com/hashicorp/nomad/helper/freeport
 github.com/hashicorp/nomad/helper/grpc-middleware/logging
 github.com/hashicorp/nomad/helper/mount
 github.com/hashicorp/nomad/helper/pluginutils/grpcutils
 github.com/hashicorp/nomad/helper/pluginutils/hclspecutils
 github.com/hashicorp/nomad/helper/pluginutils/hclutils
+github.com/hashicorp/nomad/helper/pluginutils/loader
 github.com/hashicorp/nomad/helper/stats
+github.com/hashicorp/nomad/helper/testlog
+github.com/hashicorp/nomad/helper/useragent
 github.com/hashicorp/nomad/helper/uuid
 github.com/hashicorp/nomad/lib/kheap
+github.com/hashicorp/nomad/nomad/mock
 github.com/hashicorp/nomad/nomad/structs
+github.com/hashicorp/nomad/nomad/structs/config
 github.com/hashicorp/nomad/plugins
 github.com/hashicorp/nomad/plugins/base
 github.com/hashicorp/nomad/plugins/base/proto
@@ -152,23 +264,43 @@ github.com/hashicorp/nomad/plugins/device
 github.com/hashicorp/nomad/plugins/device/proto
 github.com/hashicorp/nomad/plugins/drivers
 github.com/hashicorp/nomad/plugins/drivers/proto
+github.com/hashicorp/nomad/plugins/drivers/testutils
 github.com/hashicorp/nomad/plugins/drivers/utils
 github.com/hashicorp/nomad/plugins/shared/hclspec
 github.com/hashicorp/nomad/plugins/shared/structs
 github.com/hashicorp/nomad/plugins/shared/structs/proto
+github.com/hashicorp/nomad/testutil
+github.com/hashicorp/nomad/version
 # github.com/hashicorp/raft v1.1.3-0.20200211192230-365023de17e6
 github.com/hashicorp/raft
 # github.com/hashicorp/serf v0.8.5
 github.com/hashicorp/serf/coordinate
+# github.com/hashicorp/vault/api v1.0.5-0.20190730042357-746c0b111519
+github.com/hashicorp/vault/api
+# github.com/hashicorp/vault/sdk v0.1.14-0.20190730042320-0dc007d98cc8
+github.com/hashicorp/vault/sdk/helper/compressutil
+github.com/hashicorp/vault/sdk/helper/consts
+github.com/hashicorp/vault/sdk/helper/hclutil
+github.com/hashicorp/vault/sdk/helper/jsonutil
+github.com/hashicorp/vault/sdk/helper/parseutil
+github.com/hashicorp/vault/sdk/helper/strutil
 # github.com/hashicorp/yamux v0.0.0-20181012175058-2f1d1f20f75d
 github.com/hashicorp/yamux
 # github.com/hpcloud/tail v1.0.1-0.20170814160653-37f427138745
 github.com/hpcloud/tail/util
 github.com/hpcloud/tail/watch
+# github.com/ishidawataru/sctp v0.0.0-20191218070446-00ab2ac2db07
+github.com/ishidawataru/sctp
+# github.com/jmespath/go-jmespath v0.0.0-20180206201540-c2b33e8439af
+github.com/jmespath/go-jmespath
 # github.com/konsorten/go-windows-terminal-sequences v1.0.3
 github.com/konsorten/go-windows-terminal-sequences
+# github.com/kr/pretty v0.2.0
+github.com/kr/pretty
 # github.com/kr/pty v1.1.5
 github.com/kr/pty
+# github.com/kr/text v0.2.0
+github.com/kr/text
 # github.com/mattn/go-colorable v0.1.6
 github.com/mattn/go-colorable
 # github.com/mattn/go-isatty v0.0.12
@@ -189,10 +321,17 @@ github.com/mitchellh/hashstructure
 github.com/mitchellh/mapstructure
 # github.com/mitchellh/reflectwalk v1.0.1
 github.com/mitchellh/reflectwalk
+# github.com/morikuni/aec v1.0.0
+github.com/morikuni/aec
 # github.com/mrunalp/fileutils v0.0.0-20171103030105-7d4729fb3618
 github.com/mrunalp/fileutils
 # github.com/oklog/run v1.0.1-0.20180308005104-6934b124db28
 github.com/oklog/run
+# github.com/opencontainers/go-digest v1.0.0-rc1
+github.com/opencontainers/go-digest
+# github.com/opencontainers/image-spec v1.0.1
+github.com/opencontainers/image-spec/specs-go
+github.com/opencontainers/image-spec/specs-go/v1
 # github.com/opencontainers/runc v1.0.0-rc90
 github.com/opencontainers/runc/libcontainer
 github.com/opencontainers/runc/libcontainer/apparmor
@@ -223,6 +362,9 @@ github.com/opencontainers/runtime-spec/specs-go
 github.com/opencontainers/selinux/go-selinux
 github.com/opencontainers/selinux/go-selinux/label
 github.com/opencontainers/selinux/pkg/pwalk
+# github.com/pierrec/lz4 v2.2.5+incompatible
+github.com/pierrec/lz4
+github.com/pierrec/lz4/internal/xxh32
 # github.com/pkg/errors v0.9.1
 github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
@@ -242,6 +384,7 @@ github.com/shirou/gopsutil/process
 # github.com/sirupsen/logrus v1.6.0
 github.com/sirupsen/logrus
 # github.com/stretchr/testify v1.5.1
+## explicit
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require
 # github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2
@@ -265,6 +408,9 @@ github.com/zclconf/go-cty/cty/msgpack
 github.com/zclconf/go-cty/cty/set
 # golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37
 golang.org/x/crypto/blake2b
+golang.org/x/crypto/ed25519
+golang.org/x/crypto/ed25519/internal/edwards25519
+golang.org/x/crypto/pbkdf2
 # golang.org/x/net v0.0.0-20200324143707-d3edc9973b7e
 golang.org/x/net/context
 golang.org/x/net/http/httpguts
@@ -273,6 +419,8 @@ golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 golang.org/x/net/internal/timeseries
 golang.org/x/net/trace
+# golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
+golang.org/x/sync/errgroup
 # golang.org/x/sys v0.0.0-20200523222454-059865788121
 golang.org/x/sys/cpu
 golang.org/x/sys/internal/unsafeheader
@@ -283,6 +431,8 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
+# golang.org/x/time v0.0.0-20191024005414-555d28b269f0
+golang.org/x/time/rate
 # golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 golang.org/x/xerrors
 golang.org/x/xerrors/internal
@@ -343,6 +493,11 @@ google.golang.org/grpc/status
 google.golang.org/grpc/tap
 # gopkg.in/fsnotify.v1 v1.4.7
 gopkg.in/fsnotify.v1
+# gopkg.in/square/go-jose.v2 v2.4.1
+gopkg.in/square/go-jose.v2
+gopkg.in/square/go-jose.v2/cipher
+gopkg.in/square/go-jose.v2/json
+gopkg.in/square/go-jose.v2/jwt
 # gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7
 gopkg.in/tomb.v1
 # gopkg.in/yaml.v2 v2.3.0
