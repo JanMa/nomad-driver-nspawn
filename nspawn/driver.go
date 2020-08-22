@@ -503,6 +503,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		d.logger.Error("failed to get machine information", "error", err)
 		if ps.ExitCode != 0 {
 			printErr()
+			err = fmt.Errorf("systemd-nspawn failed to start task")
 		}
 		if !pluginClient.Exited() {
 			if err := exec.Shutdown("", 0); err != nil {
@@ -520,6 +521,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		d.logger.Error("failed to get machine addresses", "error", err, "addresses", addr)
 		if ps.ExitCode != 0 {
 			printErr()
+			err = fmt.Errorf("systemd-nspawn failed to start task")
 		}
 		if !pluginClient.Exited() {
 			if err := exec.Shutdown("", 0); err != nil {
