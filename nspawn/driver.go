@@ -173,8 +173,11 @@ func NewNspawnDriver(logger hclog.Logger) drivers.DriverPlugin {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger = logger.Named(pluginName)
 	return &Driver{
-		eventer:        eventer.NewEventer(ctx, logger),
-		config:         &Config{},
+		eventer: eventer.NewEventer(ctx, logger),
+		config: &Config{
+			Enabled: true,
+			Volumes: true,
+		},
 		tasks:          newTaskStore(),
 		ctx:            ctx,
 		signalShutdown: cancel,
