@@ -355,48 +355,53 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	if driverConfig.Properties == nil {
 		driverConfig.Properties = make(hclutils.MapStrStr)
 	}
-	driverConfig.Properties["MemoryMax"] = strconv.Itoa(int(cfg.Resources.LinuxResources.MemoryLimitBytes))
+
+	if cfg.Resources.LinuxResources != nil {
+		driverConfig.Properties["MemoryMax"] = strconv.Itoa(int(cfg.Resources.LinuxResources.MemoryLimitBytes))
+	}
 
 	// Setup port mapping and exposed ports
-	if len(cfg.Resources.NomadResources.Networks) == 0 {
-		d.logger.Debug("no network interfaces are available")
-		if len(driverConfig.PortMap) > 0 {
-			d.logger.Error("Trying to map ports but no network interface is available")
-		}
-	} else {
-		network := cfg.Resources.NomadResources.Networks[0]
-		for _, port := range network.ReservedPorts {
-			// By default we will map the allocated port 1:1 to the container
-			machinePort := port.Value
+	if cfg.Resources.NomadResources != nil {
+		if len(cfg.Resources.NomadResources.Networks) == 0 {
+			d.logger.Debug("no network interfaces are available")
+			if len(driverConfig.PortMap) > 0 {
+				d.logger.Error("Trying to map ports but no network interface is available")
+			}
+		} else {
+			network := cfg.Resources.NomadResources.Networks[0]
+			for _, port := range network.ReservedPorts {
+				// By default we will map the allocated port 1:1 to the container
+				machinePort := port.Value
 
-			// If the user has mapped a port using port_map we'll change it here
-			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
-				machinePort = mapped
+				// If the user has mapped a port using port_map we'll change it here
+				if mapped, ok := driverConfig.PortMap[port.Label]; ok {
+					machinePort = mapped
+				}
+
+				hostPort := port.Value
+				driverConfig.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
+
+				d.logger.Debug("allocated static port", "ip", network.IP, "port", hostPort)
+				d.logger.Debug("exposed port", "port", machinePort)
 			}
 
-			hostPort := port.Value
-			driverConfig.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
+			for _, port := range network.DynamicPorts {
+				// By default we will map the allocated port 1:1 to the container
+				machinePort := port.Value
 
-			d.logger.Debug("allocated static port", "ip", network.IP, "port", hostPort)
-			d.logger.Debug("exposed port", "port", machinePort)
-		}
+				// If the user has mapped a port using port_map we'll change it here
+				if mapped, ok := driverConfig.PortMap[port.Label]; ok {
+					machinePort = mapped
+				}
 
-		for _, port := range network.DynamicPorts {
-			// By default we will map the allocated port 1:1 to the container
-			machinePort := port.Value
+				hostPort := port.Value
+				driverConfig.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
 
-			// If the user has mapped a port using port_map we'll change it here
-			if mapped, ok := driverConfig.PortMap[port.Label]; ok {
-				machinePort = mapped
+				d.logger.Debug("allocated mapped port", "ip", network.IP, "port", hostPort)
+				d.logger.Debug("exposed port", "port", machinePort)
 			}
 
-			hostPort := port.Value
-			driverConfig.Port[port.Label] = fmt.Sprintf("%d:%d", hostPort, machinePort)
-
-			d.logger.Debug("allocated mapped port", "ip", network.IP, "port", hostPort)
-			d.logger.Debug("exposed port", "port", machinePort)
 		}
-
 	}
 
 	// Validate config
