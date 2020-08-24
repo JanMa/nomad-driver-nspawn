@@ -163,7 +163,6 @@ type Config struct {
 // during recovery.
 type TaskState struct {
 	ReattachConfig *pstructs.ReattachConfig
-	TaskConfig     *drivers.TaskConfig
 	MachineName    string
 	StartedAt      time.Time
 }
@@ -257,7 +256,7 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 	}
 
 	var driverConfig drivers.TaskConfig
-	if err := taskState.TaskConfig.DecodeDriverConfig(&driverConfig); err != nil {
+	if err := handle.Config.DecodeDriverConfig(&driverConfig); err != nil {
 		return fmt.Errorf("failed to decode driver config: %v", err)
 	}
 
@@ -283,12 +282,12 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 
 		exec:         execImpl,
 		pluginClient: pluginClient,
-		taskConfig:   taskState.TaskConfig,
+		taskConfig:   handle.Config,
 		procState:    drivers.TaskStateRunning,
 		startedAt:    taskState.StartedAt,
 	}
 
-	d.tasks.Set(taskState.TaskConfig.ID, h)
+	d.tasks.Set(handle.Config.ID, h)
 
 	go h.run()
 
@@ -564,7 +563,6 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	driverState := TaskState{
 		ReattachConfig: pstructs.ReattachConfigFromGoPlugin(pluginClient.ReattachConfig()),
 		MachineName:    driverConfig.Machine,
-		TaskConfig:     cfg,
 		StartedAt:      h.startedAt,
 	}
 
