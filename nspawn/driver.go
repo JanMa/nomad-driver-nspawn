@@ -107,6 +107,7 @@ var (
 		"bind_read_only":    hclspec.NewAttr("bind_read_only", "list(map(string))", false),
 		"environment":       hclspec.NewAttr("environment", "list(map(string))", false),
 		"port_map":          hclspec.NewAttr("port_map", "list(map(number))", false),
+		"capability":        hclspec.NewAttr("capability", "list(string)", false),
 	})
 
 	// capabilities is returned by the Capabilities RPC and indicates what

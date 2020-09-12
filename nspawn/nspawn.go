@@ -54,6 +54,7 @@ type MachineConfig struct {
 	Bind             hclutils.MapStrStr `codec:"bind"`
 	BindReadOnly     hclutils.MapStrStr `codec:"bind_read_only"`
 	Boot             bool               `codec:"boot"`
+	Capability       []string           `codec:"capability"`
 	Command          []string           `codec:"command"`
 	Console          string             `codec:"console"`
 	Environment      hclutils.MapStrStr `codec:"environment"`
@@ -173,6 +174,9 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	}
 	if len(c.Command) > 0 {
 		args = append(args, c.Command...)
+	}
+	if len(c.Capability) > 0 {
+		args = append(args, "--capability", strings.Join(c.Capability, ","))
 	}
 	return args, nil
 }
