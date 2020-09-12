@@ -198,8 +198,9 @@ func (c *MachineConfig) Validate() error {
 	}
 	if c.ResolvConf != "" {
 		switch c.ResolvConf {
-		case "copy-host", "copy-static", "bind-host",
-			"bind-static", "delete", "auto":
+		case "off", "copy-host", "copy-static", "copy-uplink", "copy-stub",
+			"replace-host", "replace-static", "replace-uplink", "replace-stub",
+			"bind-host", "bind-static", "bind-uplink", "bind-stub", "delete", "auto":
 		default:
 			return fmt.Errorf("invalid parameter for resolv_conf")
 		}
