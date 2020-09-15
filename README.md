@@ -140,6 +140,14 @@ should cover a broad range of use cases:
     }
   }
   ```
+* [`capability`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--capability=) -
+  (Optional) List of additional capabilities to grant the container.
+  
+  ```hcl
+  config {
+    capability = ["CAP_NET_ADMIN"]
+  }
+  ```
 
 The `image_download` block supports the following arguments:
 * `url` - The URL of the image to download. The URL must be of type `http://` or

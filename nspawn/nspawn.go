@@ -172,11 +172,11 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	for k, v := range c.Properties {
 		args = append(args, "--property="+k+"="+v)
 	}
-	if len(c.Command) > 0 {
-		args = append(args, c.Command...)
-	}
 	if len(c.Capability) > 0 {
 		args = append(args, "--capability", strings.Join(c.Capability, ","))
+	}
+	if len(c.Command) > 0 {
+		args = append(args, c.Command...)
 	}
 	return args, nil
 }
