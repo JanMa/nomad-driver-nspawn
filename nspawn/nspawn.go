@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -28,6 +29,11 @@ const (
 
 	TarImage string = "tar"
 	RawImage string = "raw"
+)
+
+var (
+	transferMut sync.Mutex
+	mutMap      = make(map[string]*sync.Mutex)
 )
 
 type MachineProps struct {
@@ -475,6 +481,43 @@ func DownloadImage(url, name, verify, imageType string, force bool, logger hclog
 		return err
 	}
 
+	if imageType != TarImage && imageType != RawImage {
+		return fmt.Errorf("unsupported image type")
+	}
+
+	// systemd-importd only allows one transfer for each unique URL at a
+	// time. To not run into API errors, we need to ensure we do not try to
+	// download an image from the same URL multiple times at one. We do this
+	// by creating a simple map containing a Mutex for each URL and only
+	// start our download if we can hold the lock for a given URL. This
+	// naively assumes we are the only process making regular use of the
+	// systemd-importd api on the host.
+	//
+	// In the future it would probably be better to make use of the built-in
+	// signals in systemd-importd as described here:
+	// https://www.freedesktop.org/wiki/Software/systemd/importd/
+
+	// get global lock
+	logger.Debug("waiting on global download lock")
+	transferMut.Lock()
+	// get lock for given remote
+	l, ok := mutMap[url]
+	if !ok {
+		// create it if it does not exist
+		var m sync.Mutex
+		l = &m
+		mutMap[url] = &m
+	} else {
+		logger.Debug("remote lock exists", "remote", url)
+	}
+	// release global lock
+	transferMut.Unlock()
+	// get lock for remote
+	logger.Debug("waiting on remote lock", "remote", url)
+	l.Lock()
+	// release lock for remote when done
+	defer l.Unlock()
+
 	var t *import1.Transfer
 	switch imageType {
 	case TarImage:
@@ -487,8 +530,9 @@ func DownloadImage(url, name, verify, imageType string, force bool, logger hclog
 	if err != nil {
 		return err
 	}
-	logger.Info("downloading image", "image", name)
 
+	// wait until transfer is finished
+	logger.Info("downloading image", "image", name)
 	done := false
 	ticker := time.NewTicker(2 * time.Second)
 	for !done {
