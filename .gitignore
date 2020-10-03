@@ -20,3 +20,6 @@ nomad-driver-nspawn
 
 # systemd-nspawn related
 *.lck
+
+# Go version detection
+.go114

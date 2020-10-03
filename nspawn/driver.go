@@ -39,11 +39,14 @@ const (
 )
 
 var (
+	// populated by Makefile
+	pluginVersion string
+
 	// pluginInfo is the response returned for the PluginInfo RPC
 	pluginInfo = &base.PluginInfoResponse{
 		Type:              base.PluginTypeDriver,
 		PluginApiVersions: []string{drivers.ApiVersion010},
-		PluginVersion:     "0.0.1",
+		PluginVersion:     pluginVersion,
 		Name:              pluginName,
 	}
 
