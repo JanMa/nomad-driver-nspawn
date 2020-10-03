@@ -9,19 +9,27 @@ and their machine ID will be set to the allocation ID of the started Nomad task.
 ## Client requirements
 
 * [Nomad](https://nomadproject.io) 0.12+ running as `root`
-* [Go](https://golang.org/doc/install) 1.14+
+* [Go](https://golang.org/doc/install) 1.14
 * Linux
 * [`systemd-nspawn`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html)
   installed
 
 ## Building the driver from source
 
-Checkout this repository and simply run `go build -mod=vendor`
+Checkout this repository and simply run `make`.
 
 ```shell
 $ git clone https://github.com/JanMa/nomad-driver-nspawn.git
 $ cd nomad-driver-nspawn
-$ go build -mod=vendor
+$ make
+```
+
+## Testing the driver
+
+To execute the built-in test suite run
+
+``` shell
+$ make test
 ```
 
 ## Using the driver
@@ -32,6 +40,7 @@ command
 ```shell
 $ sudo nomad agent -dev -plugin-dir=$(pwd) -config=example/config.hcl
 ```
+
 ## Minimal job example
 
 ```hcl
@@ -87,11 +96,11 @@ should cover a broad range of use cases:
 * `image_download` - (Optional) Download the used image according to the
   settings defined in this block. Structure is documented below.
 * [`pivot_root`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--pivot-root=) -
-  (Optional) Pivot the specified directory to the be containers root directory.
+  (Optional) Pivot the specified directory to be the containers root directory.
 * [`resolv_conf`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--resolv-conf=) -
   (Optional) Configure how `/etc/resolv.conf` is handled inside the container.
 * [`user`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#-u) -
-  (Optional) Change to the specified user in the containers user database.
+  (Optional) Change to the specified user in the container's user database.
 * [`volatile`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--volatile) -
   (Optional) Boot the container in volatile mode.
 * [`working_directory`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--chdir=) -
@@ -142,7 +151,7 @@ should cover a broad range of use cases:
   ```
 * [`capability`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--capability=) -
   (Optional) List of additional capabilities to grant the container.
-  
+
   ```hcl
   config {
     capability = ["CAP_NET_ADMIN"]
@@ -158,10 +167,3 @@ The `image_download` block supports the following arguments:
 * `force` - (Optional) `true` or `false` (default) If a local copy already
   exists, delete it first and replace it by the newly downloaded image.
 * `type` - (Optional) `tar` (default) or `raw`. The type of image to download.
-
-## TODO
-- [x] download images via `machinectl`
-- [ ] support network modes
-- [x] support exec commands
-- [x] bind task directories in container
-- [ ] write tests

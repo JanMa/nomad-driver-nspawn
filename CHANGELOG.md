@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
   - Support for granting additional capabilities to containers. @mateuszlewko
   - Support for all new options of `resolv_conf` added in Systemd 246. @mateuszlewko
+  - Ensure images can be safely downloaded in paralell.
+  - Ported tests from `exec` driver to this project. They cover basic
+    functionality like starting, stopping, killing, destroying tasks and
+    executing commands in them.
+  - Added Makefile for common build operations.
+### Changed
+  - Improved error message if systemd-nspawn fails to start a task.
+  - `NewNspawnDriver()` now returns a driver with the default config settings.
+### Fixed
+  - Fixed a runtime panic which occured if a task had no resources assigned.
+
 ## [0.3.0] - 2020-08-12
 ### Added
   - Support for Nomad `bridge` networking mode. This also enables the use of
