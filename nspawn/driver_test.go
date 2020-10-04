@@ -362,5 +362,6 @@ func TestNspawnDriver_HandlerExec(t *testing.T) {
 		t.Fatalf("expected output to contain %q but found: %q", expected, res.Stdout)
 	}
 
+	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
