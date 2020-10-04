@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Fixed
+  - Ensure all test containers are properly stopped.
+
 ## [0.4.0] - 2020-10-03
 ### Added
   - Support for granting additional capabilities to containers. @mateuszlewko
@@ -27,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     logs and shown in the WebUi.
   - Support for `volume_mount` stanza. Volumes are enabled by default and can be
     disabled by setting `volumes = false` inside the driver config.
+
 ## [0.2.0] - 2020-06-27
 ### Added
   - Support for downloading images via the
