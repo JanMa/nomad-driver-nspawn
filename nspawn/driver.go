@@ -258,11 +258,6 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 		return fmt.Errorf("failed to decode task state from handle: %v", err)
 	}
 
-	var driverConfig drivers.TaskConfig
-	if err := handle.Config.DecodeDriverConfig(&driverConfig); err != nil {
-		return fmt.Errorf("failed to decode driver config: %v", err)
-	}
-
 	plugRC, err := pstructs.ReattachConfigToGoPlugin(taskState.ReattachConfig)
 	if err != nil {
 		return fmt.Errorf("failed to build ReattachConfig from taskConfig state: %v", err)
