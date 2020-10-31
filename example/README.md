@@ -117,3 +117,9 @@ Commercial support is available at
 </body>
 </html>
 ```
+
+## system-job
+
+This folder contains the same job as the `image-download` folder, but starts it
+as a Nomad system job and without private networking enabled. Any ports exposed
+in the container will be directly accessible on the host.

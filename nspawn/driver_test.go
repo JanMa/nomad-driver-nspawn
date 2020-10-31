@@ -52,6 +52,7 @@ func alpineConfig(cmd string) *MachineConfig {
 		},
 		ProcessTwo: true,
 		ResolvConf: "copy-host",
+		NetworkVeth: true,
 	}
 }
 
@@ -66,6 +67,7 @@ func debianConfig() *MachineConfig {
 			Verify: "no",
 		},
 		ResolvConf: "copy-host",
+		NetworkVeth: true,
 	}
 }
 
