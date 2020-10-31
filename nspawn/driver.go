@@ -70,11 +70,10 @@ var (
 			hclspec.NewLiteral("true"),
 		),
 		"ephemeral": hclspec.NewAttr("ephemeral", "bool", false),
-		//TODO: Ensure we can handle containers without private networking?
-		// "network_veth": hclspec.NewDefault(
-		// 	hclspec.NewAttr("network_veth", "bool", false),
-		// 	hclspec.NewLiteral("true"),
-		// ),
+		"network_veth": hclspec.NewDefault(
+			hclspec.NewAttr("network_veth", "bool", false),
+			hclspec.NewLiteral("true"),
+		),
 		"process_two": hclspec.NewAttr("process_two", "bool", false),
 		"read_only":   hclspec.NewAttr("read_only", "bool", false),
 		"user_namespacing": hclspec.NewDefault(
@@ -308,12 +307,12 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 	driverConfig.Machine = cfg.Name + "-" + cfg.AllocID
 	driverConfig.Port = make(map[string]string)
-	//TODO: Ensure we can handle containers without private networking?
-	if cfg.NetworkIsolation == nil {
-		driverConfig.NetworkVeth = true
-	} else {
+
+	//If network isolation is enabled, disable user namespacing and network-veth
+	if cfg.NetworkIsolation != nil {
 		driverConfig.NetworkNamespace = cfg.NetworkIsolation.Path
 		driverConfig.UserNamespacing = false
+		driverConfig.NetworkVeth = false
 	}
 	// pass predefined environment vars
 	if driverConfig.Environment == nil {
@@ -521,31 +520,38 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
 
-	addr, err := MachineAddresses(driverConfig.Machine, machineAddressTimeout)
-	if err != nil {
-		d.logger.Error("failed to get machine addresses", "error", err, "addresses", addr)
-		if ps.ExitCode != 0 {
-			printErr()
-			err = fmt.Errorf("systemd-nspawn failed to start task")
-		}
-		if !pluginClient.Exited() {
-			if err := exec.Shutdown("", 0); err != nil {
-				d.logger.Error("destroying executor failed", "err", err)
+	var ip string
+	if len(p.NetworkInterfaces) > 0 {
+		addr, err := MachineAddresses(driverConfig.Machine, machineAddressTimeout)
+		if err != nil {
+			d.logger.Error("failed to get machine addresses", "error", err, "addresses", addr)
+			if ps.ExitCode != 0 {
+				printErr()
+				err = fmt.Errorf("systemd-nspawn failed to start task")
 			}
+			if !pluginClient.Exited() {
+				if err := exec.Shutdown("", 0); err != nil {
+					d.logger.Error("destroying executor failed", "err", err)
+				}
 
-			pluginClient.Kill()
+				pluginClient.Kill()
+			}
+			return nil, nil, err
 		}
-		return nil, nil, err
+
+		d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
+		ip = addr.IPv4.String()
+	} else if len(cfg.Resources.NomadResources.Networks) > 0 {
+		ip = cfg.Resources.NomadResources.Networks[0].IP
 	}
 
-	d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
 	network := &drivers.DriverNetwork{
 		PortMap:       driverConfig.PortMap,
-		IP:            addr.IPv4.String(),
+		IP:            ip,
 		AutoAdvertise: false,
 	}
 
-	if cfg.NetworkIsolation == nil {
+	if cfg.NetworkIsolation == nil && len(p.NetworkInterfaces) > 0 {
 		err = p.ConfigureIPTablesRules(false)
 		if err != nil {
 			d.logger.Error("Failed to set up IPTables rules", "error", err)
@@ -628,7 +634,7 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 		return drivers.ErrTaskNotFound
 	}
 
-	if handle.taskConfig.NetworkIsolation == nil {
+	if handle.taskConfig.NetworkIsolation == nil && len(handle.machine.NetworkInterfaces) > 0 {
 		if err := handle.machine.ConfigureIPTablesRules(true); err != nil {
 			d.logger.Error("StopTask: Failed to remove IPTables rules", "error", err)
 		}

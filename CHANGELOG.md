@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+  - Support for running containers without private networking.
+
 ## [0.4.1] - 2020-10-29
 ### Fixed
   - Ensure all test containers are properly stopped.
@@ -13,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
   - Support for granting additional capabilities to containers. @mateuszlewko
   - Support for all new options of `resolv_conf` added in Systemd 246. @mateuszlewko
-  - Ensure images can be safely downloaded in paralell.
+  - Ensure images can be safely downloaded in parallel.
   - Ported tests from `exec` driver to this project. They cover basic
     functionality like starting, stopping, killing, destroying tasks and
     executing commands in them.
@@ -22,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improved error message if systemd-nspawn fails to start a task.
   - `NewNspawnDriver()` now returns a driver with the default config settings.
 ### Fixed
-  - Fixed a runtime panic which occured if a task had no resources assigned.
+  - Fixed a runtime panic which occurred if a task had no resources assigned.
 
 ## [0.3.0] - 2020-08-12
 ### Added

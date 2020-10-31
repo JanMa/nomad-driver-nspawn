@@ -3,8 +3,9 @@
 This is a task driver for Hashicorp [Nomad](https://nomadproject.io) to run
 containers with `systemd-nspawn`.
 
-Containers started via this driver will **always** have private networking enabled
-and their machine ID will be set to the allocation ID of the started Nomad task.
+Containers started via this driver will have private networking enabled by
+default and their machine ID will be set to the allocation ID of the started
+Nomad task.
 
 ## Client requirements
 
@@ -157,6 +158,9 @@ should cover a broad range of use cases:
     capability = ["CAP_NET_ADMIN"]
   }
   ```
+* [`network_veth`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#-n) -
+  (Optional) `true` (default) or `false`. Create a virtual ethernet link between
+  the host and the container.
 
 The `image_download` block supports the following arguments:
 * `url` - The URL of the image to download. The URL must be of type `http://` or
