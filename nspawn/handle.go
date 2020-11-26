@@ -21,6 +21,7 @@ var (
 type taskHandle struct {
 	machine *MachineProps
 	logger  hclog.Logger
+	networkInterfaces []string
 
 	// stateLock syncs access to all fields below
 	stateLock sync.RWMutex

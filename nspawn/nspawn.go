@@ -70,6 +70,7 @@ type MachineConfig struct {
 	Machine          string             `codec:"machine"`
 	NetworkNamespace string             `codec:"network_namespace"`
 	NetworkVeth      bool               `codec:"network_veth"`
+	NetworkZone      string             `codec:"network_zone"`
 	PivotRoot        string             `codec:"pivot_root"`
 	Port             hclutils.MapStrStr `codec:"port"`
 	PortMap          hclutils.MapStrInt `codec:"port_map"`
@@ -181,6 +182,9 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	if len(c.Capability) > 0 {
 		args = append(args, "--capability", strings.Join(c.Capability, ","))
 	}
+	if len(c.NetworkZone) > 0 {
+		args = append(args, fmt.Sprintf("--network-zone=%s", c.NetworkZone))
+	}
 	if len(c.Command) > 0 {
 		args = append(args, c.Command...)
 	}
@@ -291,9 +295,9 @@ func DescribeMachine(name string, timeout time.Duration) (*MachineProps, error) 
 	}
 }
 
-func (p *MachineProps) ConfigureIPTablesRules(delete bool) error {
-	if len(p.NetworkInterfaces) == 0 {
-		return fmt.Errorf("no network interface configured")
+func ConfigureIPTablesRules(delete bool, interfaces []string) error {
+	if len(interfaces) == 0 {
+		return fmt.Errorf("no network interfaces configured")
 	}
 
 	t, e := iptables.New()
@@ -301,34 +305,47 @@ func (p *MachineProps) ConfigureIPTablesRules(delete bool) error {
 		return e
 	}
 
-	iFace, e := net.InterfaceByIndex(int(p.NetworkInterfaces[0]))
-	if e != nil {
-		return e
-	}
+	for _, i := range interfaces {
+		rules := [][]string{[]string{"-o", i, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+			[]string{"-i", i, "!", "-o", i, "-j", "ACCEPT"},
+			[]string{"-i", i, "-o", i, "-j", "ACCEPT"},
+		}
 
-	rules := [][]string{[]string{"-o", iFace.Name, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		[]string{"-i", iFace.Name, "!", "-o", iFace.Name, "-j", "ACCEPT"},
-		[]string{"-i", iFace.Name, "-o", iFace.Name, "-j", "ACCEPT"},
-	}
-
-	for _, r := range rules {
-		switch ok, err := t.Exists("filter", "FORWARD", r...); {
-		case err == nil && !ok:
-			e := t.Append("filter", "FORWARD", r...)
-			if e != nil {
-				return e
+		for _, r := range rules {
+			switch ok, err := t.Exists("filter", "FORWARD", r...); {
+			case err == nil && !ok:
+				e := t.Append("filter", "FORWARD", r...)
+				if e != nil {
+					return e
+				}
+			case err == nil && ok && delete:
+				e := t.Delete("filter", "FORWARD", r...)
+				if e != nil {
+					return e
+				}
+			case err != nil:
+				return err
 			}
-		case err == nil && ok && delete:
-			e := t.Delete("filter", "FORWARD", r...)
-			if e != nil {
-				return e
-			}
-		case err != nil:
-			return err
 		}
 	}
 
 	return nil
+}
+
+func (p *MachineProps) GetNetworkInterfaces() ([]string, error) {
+	if len(p.NetworkInterfaces) == 0 {
+		return nil, fmt.Errorf("machine has no network interfaces assigned")
+	}
+
+	n := []string{}
+	for _, i := range p.NetworkInterfaces {
+		iFace, err := net.InterfaceByIndex(int(i))
+		if err != nil {
+			return []string{}, err
+		}
+		n = append(n, iFace.Name)
+	}
+	return n, nil
 }
 
 func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error) {
