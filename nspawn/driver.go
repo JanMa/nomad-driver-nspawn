@@ -110,6 +110,7 @@ var (
 		"environment":       hclspec.NewAttr("environment", "list(map(string))", false),
 		"port_map":          hclspec.NewAttr("port_map", "list(map(number))", false),
 		"capability":        hclspec.NewAttr("capability", "list(string)", false),
+		"network_zone":      hclspec.NewAttr("network_zone", "string", false),
 	})
 
 	// capabilities is returned by the Capabilities RPC and indicates what
@@ -273,9 +274,15 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 		return e
 	}
 
+	netIF, e := p.GetNetworkInterfaces()
+	if e != nil {
+		d.logger.Error("failed to get machine network interfacves", "error", err)
+	}
+
 	h := &taskHandle{
-		machine: p,
-		logger:  d.logger,
+		machine:           p,
+		logger:            d.logger,
+		networkInterfaces: netIF,
 
 		exec:         execImpl,
 		pluginClient: pluginClient,
@@ -521,6 +528,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	d.logger.Debug("gathered information about new machine", "name", p.Name, "leader", p.Leader)
 
 	var ip string
+	netIF := []string{}
 	if len(p.NetworkInterfaces) > 0 {
 		addr, err := MachineAddresses(driverConfig.Machine, machineAddressTimeout)
 		if err != nil {
@@ -541,6 +549,11 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 
 		d.logger.Debug("gathered address of new machine", "name", p.Name, "ip", addr.IPv4.String())
 		ip = addr.IPv4.String()
+
+		netIF, err = p.GetNetworkInterfaces()
+		if err != nil {
+			d.logger.Error("failed to get machine network interfacves", "error", err)
+		}
 	} else if len(cfg.Resources.NomadResources.Networks) > 0 {
 		ip = cfg.Resources.NomadResources.Networks[0].IP
 	}
@@ -552,15 +565,16 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	if cfg.NetworkIsolation == nil && len(p.NetworkInterfaces) > 0 {
-		err = p.ConfigureIPTablesRules(false)
+		err = ConfigureIPTablesRules(false, netIF)
 		if err != nil {
 			d.logger.Error("Failed to set up IPTables rules", "error", err)
 		}
 	}
 
 	h := &taskHandle{
-		machine: p,
-		logger:  d.logger,
+		machine:           p,
+		logger:            d.logger,
+		networkInterfaces: netIF,
 
 		exec:         exec,
 		pluginClient: pluginClient,
@@ -634,8 +648,9 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 		return drivers.ErrTaskNotFound
 	}
 
-	if handle.taskConfig.NetworkIsolation == nil && len(handle.machine.NetworkInterfaces) > 0 {
-		if err := handle.machine.ConfigureIPTablesRules(true); err != nil {
+	if handle.taskConfig.NetworkIsolation == nil && len(handle.networkInterfaces) > 0 &&
+		!strings.HasPrefix(handle.networkInterfaces[0], "vz-") {
+		if err := ConfigureIPTablesRules(true, handle.networkInterfaces); err != nil {
 			d.logger.Error("StopTask: Failed to remove IPTables rules", "error", err)
 		}
 	}
