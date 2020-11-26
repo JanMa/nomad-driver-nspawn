@@ -117,6 +117,8 @@ func TestNspawnDriver_StartWait(t *testing.T) {
 	require.NoError(err)
 	result := <-ch
 	require.Zero(result.ExitCode)
+
+	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
 
@@ -281,6 +283,7 @@ func TestNspawnDriver_Stats(t *testing.T) {
 		require.Fail("timeout receiving from channel")
 	}
 
+	require.NoError(harness.StopTask(task.ID, 0, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
 
@@ -324,6 +327,7 @@ func TestNspawnDriver_Start_Wait_AllocDir(t *testing.T) {
 	require.NoError(err)
 	require.Exactly(exp, act)
 
+	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
 
