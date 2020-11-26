@@ -123,3 +123,8 @@ Commercial support is available at
 This folder contains the same job as the `image-download` folder, but starts it
 as a Nomad system job and without private networking enabled. Any ports exposed
 in the container will be directly accessible on the host.
+
+## network-zone
+
+This folder contains two job files which each start a job with two tasks running
+Debian. All started allocations will be part of the same network zone.
