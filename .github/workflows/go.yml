@@ -1,0 +1,39 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+    name: Build
+    runs-on: ubuntu-20.04
+    steps:
+
+    - name: Set up Go 1.x
+      uses: actions/setup-go@v2
+      with:
+        go-version: ^1.14
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Get dependencies
+      run: sudo apt install make systemd-container -y
+
+    - name: Get go 1.14 for root
+      run: |
+        cd
+        sudo go get -v golang.org/dl/go1.14
+        sudo /root/go/bin/go1.14 download
+
+    - name: Build
+      run: make
+
+    - name: Test
+      run: make test --always-make
