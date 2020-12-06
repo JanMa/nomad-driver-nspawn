@@ -2,7 +2,9 @@ name: Build and Test
 
 on:
   push:
-    branches: [ master ]
+    branches:
+      - master
+      - devel
   pull_request:
     branches: [ master ]
 
@@ -31,3 +33,9 @@ jobs:
 
     - name: Test
       run: make test --always-make
+
+    - name: Upload binary
+      uses: actions/upload-artifact@v2
+      with:
+        name: nomad-driver-nspawn
+        path: nomad-driver-nspawn
