@@ -35,14 +35,20 @@ tidy: get
 vendor:	tidy
 		GO111MODULE=on go mod vendor -v
 
-test: | .go114
-		sudo $(GO114) test -v ./...
+nspawn.test: | .go114
+		go test -c ./nspawn
 
-cover: | .go114
-		sudo $(GO114) test -v -cover ./...
+test: | nspawn.test
+		sudo ./nspawn.test
+
+nspawn.cover: | .go114
+		go test -cover -c ./nspawn -o nspawn.cover
+
+cover: | nspawn.cover
+		sudo ./nspawn.cover
 
 clean:
-		@rm -rf nomad-driver-nspawn
+		@rm -rf nomad-driver-nspawn nspawn.test nspawn.cover
 
 .ONESHELL:
 .go114:

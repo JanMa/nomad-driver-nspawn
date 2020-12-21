@@ -26,12 +26,6 @@ jobs:
     - name: Get dependencies
       run: sudo apt install make systemd-container -y
 
-    - name: Get go 1.14 for root
-      run: |
-        cd
-        sudo go get -v golang.org/dl/go1.14
-        sudo /root/go/bin/go1.14 download
-
     - name: Build
       run: make
 
