@@ -1,6 +1,6 @@
 job "consul" {
   datacenters = ["dc1"]
-  type = "system"
+  type = "service"
   group "linux" {
     count = 1
 

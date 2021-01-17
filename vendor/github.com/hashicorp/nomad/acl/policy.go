@@ -24,26 +24,27 @@ const (
 	// combined we take the union of all capabilities. If the deny capability is present, it
 	// takes precedence and overwrites all other capabilities.
 
-	NamespaceCapabilityDeny                = "deny"
-	NamespaceCapabilityListJobs            = "list-jobs"
-	NamespaceCapabilityReadJob             = "read-job"
-	NamespaceCapabilitySubmitJob           = "submit-job"
-	NamespaceCapabilityDispatchJob         = "dispatch-job"
-	NamespaceCapabilityReadLogs            = "read-logs"
-	NamespaceCapabilityReadFS              = "read-fs"
-	NamespaceCapabilityAllocExec           = "alloc-exec"
-	NamespaceCapabilityAllocNodeExec       = "alloc-node-exec"
-	NamespaceCapabilityAllocLifecycle      = "alloc-lifecycle"
-	NamespaceCapabilitySentinelOverride    = "sentinel-override"
-	NamespaceCapabilityCSIRegisterPlugin   = "csi-register-plugin"
-	NamespaceCapabilityCSIWriteVolume      = "csi-write-volume"
-	NamespaceCapabilityCSIReadVolume       = "csi-read-volume"
-	NamespaceCapabilityCSIListVolume       = "csi-list-volume"
-	NamespaceCapabilityCSIMountVolume      = "csi-mount-volume"
-	NamespaceCapabilityListScalingPolicies = "list-scaling-policies"
-	NamespaceCapabilityReadScalingPolicy   = "read-scaling-policy"
-	NamespaceCapabilityReadJobScaling      = "read-job-scaling"
-	NamespaceCapabilityScaleJob            = "scale-job"
+	NamespaceCapabilityDeny                 = "deny"
+	NamespaceCapabilityListJobs             = "list-jobs"
+	NamespaceCapabilityReadJob              = "read-job"
+	NamespaceCapabilitySubmitJob            = "submit-job"
+	NamespaceCapabilityDispatchJob          = "dispatch-job"
+	NamespaceCapabilityReadLogs             = "read-logs"
+	NamespaceCapabilityReadFS               = "read-fs"
+	NamespaceCapabilityAllocExec            = "alloc-exec"
+	NamespaceCapabilityAllocNodeExec        = "alloc-node-exec"
+	NamespaceCapabilityAllocLifecycle       = "alloc-lifecycle"
+	NamespaceCapabilitySentinelOverride     = "sentinel-override"
+	NamespaceCapabilityCSIRegisterPlugin    = "csi-register-plugin"
+	NamespaceCapabilityCSIWriteVolume       = "csi-write-volume"
+	NamespaceCapabilityCSIReadVolume        = "csi-read-volume"
+	NamespaceCapabilityCSIListVolume        = "csi-list-volume"
+	NamespaceCapabilityCSIMountVolume       = "csi-mount-volume"
+	NamespaceCapabilityListScalingPolicies  = "list-scaling-policies"
+	NamespaceCapabilityReadScalingPolicy    = "read-scaling-policy"
+	NamespaceCapabilityReadJobScaling       = "read-job-scaling"
+	NamespaceCapabilityScaleJob             = "scale-job"
+	NamespaceCapabilitySubmitRecommendation = "submit-recommendation"
 )
 
 var (
@@ -153,7 +154,7 @@ func isNamespaceCapabilityValid(cap string) bool {
 		NamespaceCapabilityListScalingPolicies, NamespaceCapabilityReadScalingPolicy, NamespaceCapabilityReadJobScaling, NamespaceCapabilityScaleJob:
 		return true
 	// Separate the enterprise-only capabilities
-	case NamespaceCapabilitySentinelOverride:
+	case NamespaceCapabilitySentinelOverride, NamespaceCapabilitySubmitRecommendation:
 		return true
 	default:
 		return false
@@ -183,6 +184,7 @@ func expandNamespacePolicy(policy string) []string {
 		NamespaceCapabilityAllocLifecycle,
 		NamespaceCapabilityCSIMountVolume,
 		NamespaceCapabilityCSIWriteVolume,
+		NamespaceCapabilitySubmitRecommendation,
 	}...)
 
 	switch policy {
@@ -238,7 +240,7 @@ func Parse(rules string) (*Policy, error) {
 	}
 
 	// Attempt to parse
-	if err := hcl.Decode(p, rules); err != nil {
+	if err := hclDecode(p, rules); err != nil {
 		return nil, fmt.Errorf("Failed to parse ACL Policy: %v", err)
 	}
 
@@ -311,4 +313,15 @@ func Parse(rules string) (*Policy, error) {
 		return nil, fmt.Errorf("Invalid plugin policy: %#v", p.Plugin)
 	}
 	return p, nil
+}
+
+// hclDecode wraps hcl.Decode function but handles any unexpected panics
+func hclDecode(p *Policy, rules string) (err error) {
+	defer func() {
+		if rerr := recover(); rerr != nil {
+			err = fmt.Errorf("invalid acl policy: %v", rerr)
+		}
+	}()
+
+	return hcl.Decode(p, rules)
 }

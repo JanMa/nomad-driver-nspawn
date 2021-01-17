@@ -13,7 +13,6 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/hashicorp/nomad/acl"
-	"github.com/mitchellh/copystructure"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -277,32 +276,6 @@ func CopySliceNodeScoreMeta(s []*NodeScoreMeta) []*NodeScoreMeta {
 	return c
 }
 
-func CopyScalingPolicy(p *ScalingPolicy) *ScalingPolicy {
-	if p == nil {
-		return nil
-	}
-
-	opaquePolicyConfig, err := copystructure.Copy(p.Policy)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	c := ScalingPolicy{
-		ID:          p.ID,
-		Policy:      opaquePolicyConfig.(map[string]interface{}),
-		Enabled:     p.Enabled,
-		Min:         p.Min,
-		Max:         p.Max,
-		CreateIndex: p.CreateIndex,
-		ModifyIndex: p.ModifyIndex,
-	}
-	c.Target = make(map[string]string, len(p.Target))
-	for k, v := range p.Target {
-		c.Target[k] = v
-	}
-	return &c
-}
-
 // VaultPoliciesSet takes the structure returned by VaultPolicies and returns
 // the set of required policies
 func VaultPoliciesSet(policies map[string]map[string]*Vault) []string {
@@ -312,6 +285,26 @@ func VaultPoliciesSet(policies map[string]map[string]*Vault) []string {
 		for _, tp := range tgp {
 			for _, p := range tp.Policies {
 				set[p] = struct{}{}
+			}
+		}
+	}
+
+	flattened := make([]string, 0, len(set))
+	for p := range set {
+		flattened = append(flattened, p)
+	}
+	return flattened
+}
+
+// VaultNaVaultNamespaceSet takes the structure returned by VaultPolicies and
+// returns a set of required namespaces
+func VaultNamespaceSet(policies map[string]map[string]*Vault) []string {
+	set := make(map[string]struct{})
+
+	for _, tgp := range policies {
+		for _, tp := range tgp {
+			if tp.Namespace != "" {
+				set[tp.Namespace] = struct{}{}
 			}
 		}
 	}
