@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/nomad/helper"
 )
 
 // CSISocketName is the filename that Nomad expects plugins to create inside the
@@ -152,7 +154,10 @@ func (o *CSIMountOptions) Copy() *CSIMountOptions {
 	if o == nil {
 		return nil
 	}
-	return &(*o)
+
+	no := *o
+	no.MountFlags = helper.CopySliceString(o.MountFlags)
+	return &no
 }
 
 func (o *CSIMountOptions) Merge(p *CSIMountOptions) {
@@ -167,7 +172,7 @@ func (o *CSIMountOptions) Merge(p *CSIMountOptions) {
 	}
 }
 
-// VolumeMountOptions implements the Stringer and GoStringer interfaces to prevent
+// CSIMountOptions implements the Stringer and GoStringer interfaces to prevent
 // accidental leakage of sensitive mount flags via logs.
 var _ fmt.Stringer = &CSIMountOptions{}
 var _ fmt.GoStringer = &CSIMountOptions{}
@@ -207,10 +212,11 @@ func (s *CSISecrets) GoString() string {
 }
 
 type CSIVolumeClaim struct {
-	AllocationID string
-	NodeID       string
-	Mode         CSIVolumeClaimMode
-	State        CSIVolumeClaimState
+	AllocationID   string
+	NodeID         string
+	ExternalNodeID string
+	Mode           CSIVolumeClaimMode
+	State          CSIVolumeClaimState
 }
 
 type CSIVolumeClaimState int
@@ -220,6 +226,7 @@ const (
 	CSIVolumeClaimStateNodeDetached
 	CSIVolumeClaimStateControllerDetached
 	CSIVolumeClaimStateReadyToFree
+	CSIVolumeClaimStateUnpublishing
 )
 
 // CSIVolume is the full representation of a CSI Volume
@@ -299,22 +306,14 @@ func NewCSIVolume(volumeID string, index uint64) *CSIVolume {
 }
 
 func (v *CSIVolume) newStructs() {
-	if v.Topologies == nil {
-		v.Topologies = []*CSITopology{}
-	}
-	if v.Context == nil {
-		v.Context = map[string]string{}
-	}
-	if v.Parameters == nil {
-		v.Parameters = map[string]string{}
-	}
-	if v.Secrets == nil {
-		v.Secrets = CSISecrets{}
-	}
+	v.Topologies = []*CSITopology{}
+	v.MountOptions = new(CSIMountOptions)
+	v.Secrets = CSISecrets{}
+	v.Parameters = map[string]string{}
+	v.Context = map[string]string{}
 
 	v.ReadAllocs = map[string]*Allocation{}
 	v.WriteAllocs = map[string]*Allocation{}
-
 	v.ReadClaims = map[string]*CSIVolumeClaim{}
 	v.WriteClaims = map[string]*CSIVolumeClaim{}
 	v.PastClaims = map[string]*CSIVolumeClaim{}
@@ -378,8 +377,13 @@ func (v *CSIVolume) WriteSchedulable() bool {
 // WriteFreeClaims determines if there are any free write claims available
 func (v *CSIVolume) WriteFreeClaims() bool {
 	switch v.AccessMode {
-	case CSIVolumeAccessModeSingleNodeWriter, CSIVolumeAccessModeMultiNodeSingleWriter, CSIVolumeAccessModeMultiNodeMultiWriter:
-		return len(v.WriteAllocs) == 0
+	case CSIVolumeAccessModeSingleNodeWriter, CSIVolumeAccessModeMultiNodeSingleWriter:
+		return len(v.WriteClaims) == 0
+	case CSIVolumeAccessModeMultiNodeMultiWriter:
+		// the CSI spec doesn't allow for setting a max number of writers.
+		// we track node resource exhaustion through v.ResourceExhausted
+		// which is checked in WriteSchedulable
+		return true
 	default:
 		return false
 	}
@@ -393,25 +397,31 @@ func (v *CSIVolume) InUse() bool {
 
 // Copy returns a copy of the volume, which shares only the Topologies slice
 func (v *CSIVolume) Copy() *CSIVolume {
-	copy := *v
-	out := &copy
-	out.newStructs()
+	out := new(CSIVolume)
+	*out = *v
+	out.newStructs() // zero-out the non-primitive structs
+
+	for _, t := range v.Topologies {
+		out.Topologies = append(out.Topologies, t.Copy())
+	}
+	if v.MountOptions != nil {
+		*out.MountOptions = *v.MountOptions
+	}
+	for k, v := range v.Secrets {
+		out.Secrets[k] = v
+	}
 	for k, v := range v.Parameters {
 		out.Parameters[k] = v
 	}
 	for k, v := range v.Context {
 		out.Context[k] = v
 	}
-	for k, v := range v.Secrets {
-		out.Secrets[k] = v
-	}
 
-	for k, v := range v.ReadAllocs {
-		out.ReadAllocs[k] = v
+	for k, alloc := range v.ReadAllocs {
+		out.ReadAllocs[k] = alloc.Copy()
 	}
-
-	for k, v := range v.WriteAllocs {
-		out.WriteAllocs[k] = v
+	for k, alloc := range v.WriteAllocs {
+		out.WriteAllocs[k] = alloc.Copy()
 	}
 
 	for k, v := range v.ReadClaims {
@@ -432,15 +442,17 @@ func (v *CSIVolume) Copy() *CSIVolume {
 
 // Claim updates the allocations and changes the volume state
 func (v *CSIVolume) Claim(claim *CSIVolumeClaim, alloc *Allocation) error {
-	switch claim.Mode {
-	case CSIVolumeClaimRead:
-		return v.ClaimRead(claim, alloc)
-	case CSIVolumeClaimWrite:
-		return v.ClaimWrite(claim, alloc)
-	case CSIVolumeClaimRelease:
-		return v.ClaimRelease(claim)
+
+	if claim.State == CSIVolumeClaimStateTaken {
+		switch claim.Mode {
+		case CSIVolumeClaimRead:
+			return v.ClaimRead(claim, alloc)
+		case CSIVolumeClaimWrite:
+			return v.ClaimWrite(claim, alloc)
+		}
 	}
-	return nil
+	// either GC or a Unpublish checkpoint
+	return v.ClaimRelease(claim)
 }
 
 // ClaimRead marks an allocation as using a volume read-only
@@ -484,7 +496,7 @@ func (v *CSIVolume) ClaimWrite(claim *CSIVolumeClaim, alloc *Allocation) error {
 	if !v.WriteFreeClaims() {
 		// Check the blocking allocations to see if they belong to this job
 		for _, a := range v.WriteAllocs {
-			if a.Namespace != alloc.Namespace || a.JobID != alloc.JobID {
+			if a != nil && (a.Namespace != alloc.Namespace || a.JobID != alloc.JobID) {
 				return fmt.Errorf("volume max claim reached")
 			}
 		}
@@ -567,6 +579,16 @@ func (v *CSIVolume) Validate() error {
 	if v.AttachmentMode == "" {
 		errs = append(errs, "missing attachment mode")
 	}
+	if v.AttachmentMode == CSIVolumeAttachmentModeBlockDevice {
+		if v.MountOptions != nil {
+			if v.MountOptions.FSType != "" {
+				errs = append(errs, "mount options not allowed for block-device")
+			}
+			if v.MountOptions.MountFlags != nil && len(v.MountOptions.MountFlags) != 0 {
+				errs = append(errs, "mount options not allowed for block-device")
+			}
+		}
+	}
 
 	// TODO: Volume Topologies are optional - We should check to see if the plugin
 	//       the volume is being registered with requires them.
@@ -612,7 +634,11 @@ type CSIVolumeClaimMode int
 const (
 	CSIVolumeClaimRead CSIVolumeClaimMode = iota
 	CSIVolumeClaimWrite
-	CSIVolumeClaimRelease
+
+	// for GC we don't have a specific claim to set the state on, so instead we
+	// create a new claim for GC in order to bump the ModifyIndex and trigger
+	// volumewatcher
+	CSIVolumeClaimGC
 )
 
 type CSIVolumeClaimBatchRequest struct {
@@ -620,20 +646,22 @@ type CSIVolumeClaimBatchRequest struct {
 }
 
 type CSIVolumeClaimRequest struct {
-	VolumeID     string
-	AllocationID string
-	NodeID       string
-	Claim        CSIVolumeClaimMode
-	State        CSIVolumeClaimState
+	VolumeID       string
+	AllocationID   string
+	NodeID         string
+	ExternalNodeID string
+	Claim          CSIVolumeClaimMode
+	State          CSIVolumeClaimState
 	WriteRequest
 }
 
 func (req *CSIVolumeClaimRequest) ToClaim() *CSIVolumeClaim {
 	return &CSIVolumeClaim{
-		AllocationID: req.AllocationID,
-		NodeID:       req.NodeID,
-		Mode:         req.Claim,
-		State:        req.State,
+		AllocationID:   req.AllocationID,
+		NodeID:         req.NodeID,
+		ExternalNodeID: req.ExternalNodeID,
+		Mode:           req.Claim,
+		State:          req.State,
 	}
 }
 
@@ -681,6 +709,16 @@ type CSIVolumeGetResponse struct {
 	QueryMeta
 }
 
+type CSIVolumeUnpublishRequest struct {
+	VolumeID string
+	Claim    *CSIVolumeClaim
+	WriteRequest
+}
+
+type CSIVolumeUnpublishResponse struct {
+	QueryMeta
+}
+
 // CSIPlugin collects fingerprint info context for the plugin for clients
 type CSIPlugin struct {
 	ID                 string
@@ -696,9 +734,15 @@ type CSIPlugin struct {
 	// Allocations are populated by denormalize to show running allocations
 	Allocations []*AllocListStub
 
+	// Jobs are populated to by job update to support expected counts and the UI
+	ControllerJobs JobDescriptions
+	NodeJobs       JobDescriptions
+
 	// Cache the count of healthy plugins
-	ControllersHealthy int
-	NodesHealthy       int
+	ControllersHealthy  int
+	ControllersExpected int
+	NodesHealthy        int
+	NodesExpected       int
 
 	CreateIndex uint64
 	ModifyIndex uint64
@@ -719,6 +763,8 @@ func NewCSIPlugin(id string, index uint64) *CSIPlugin {
 func (p *CSIPlugin) newStructs() {
 	p.Controllers = map[string]*CSIInfo{}
 	p.Nodes = map[string]*CSIInfo{}
+	p.ControllerJobs = make(JobDescriptions)
+	p.NodeJobs = make(JobDescriptions)
 }
 
 func (p *CSIPlugin) Copy() *CSIPlugin {
@@ -727,11 +773,19 @@ func (p *CSIPlugin) Copy() *CSIPlugin {
 	out.newStructs()
 
 	for k, v := range p.Controllers {
-		out.Controllers[k] = v
+		out.Controllers[k] = v.Copy()
 	}
 
 	for k, v := range p.Nodes {
-		out.Nodes[k] = v
+		out.Nodes[k] = v.Copy()
+	}
+
+	for k, v := range p.ControllerJobs {
+		out.ControllerJobs[k] = v.Copy()
+	}
+
+	for k, v := range p.NodeJobs {
+		out.NodeJobs[k] = v.Copy()
 	}
 
 	return out
@@ -861,6 +915,126 @@ func (p *CSIPlugin) DeleteAlloc(allocID, nodeID string) error {
 	return nil
 }
 
+// AddJob adds a job to the plugin and increments expected
+func (p *CSIPlugin) AddJob(job *Job, summary *JobSummary) {
+	p.UpdateExpectedWithJob(job, summary, false)
+}
+
+// DeleteJob removes the job from the plugin and decrements expected
+func (p *CSIPlugin) DeleteJob(job *Job, summary *JobSummary) {
+	p.UpdateExpectedWithJob(job, summary, true)
+}
+
+// UpdateExpectedWithJob maintains the expected instance count
+// we use the summary to add non-allocation expected counts
+func (p *CSIPlugin) UpdateExpectedWithJob(job *Job, summary *JobSummary, terminal bool) {
+	var count int
+
+	for _, tg := range job.TaskGroups {
+		if job.Type == JobTypeSystem {
+			if summary == nil {
+				continue
+			}
+
+			s, ok := summary.Summary[tg.Name]
+			if !ok {
+				continue
+			}
+
+			count = s.Running + s.Queued + s.Starting
+		} else {
+			count = tg.Count
+		}
+
+		for _, t := range tg.Tasks {
+			if t.CSIPluginConfig == nil ||
+				t.CSIPluginConfig.ID != p.ID {
+				continue
+			}
+
+			// Change the correct plugin expected, monolith should change both
+			if t.CSIPluginConfig.Type == CSIPluginTypeController ||
+				t.CSIPluginConfig.Type == CSIPluginTypeMonolith {
+				if terminal {
+					p.ControllerJobs.Delete(job)
+				} else {
+					p.ControllerJobs.Add(job, count)
+				}
+			}
+
+			if t.CSIPluginConfig.Type == CSIPluginTypeNode ||
+				t.CSIPluginConfig.Type == CSIPluginTypeMonolith {
+				if terminal {
+					p.NodeJobs.Delete(job)
+				} else {
+					p.NodeJobs.Add(job, count)
+				}
+			}
+		}
+	}
+
+	p.ControllersExpected = p.ControllerJobs.Count()
+	p.NodesExpected = p.NodeJobs.Count()
+}
+
+// JobDescription records Job identification and the count of expected plugin instances
+type JobDescription struct {
+	Namespace string
+	ID        string
+	Expected  int
+}
+
+// JobNamespacedDescriptions maps Job.ID to JobDescription
+type JobNamespacedDescriptions map[string]JobDescription
+
+func (j JobNamespacedDescriptions) Copy() JobNamespacedDescriptions {
+	copy := JobNamespacedDescriptions{}
+	for k, v := range j {
+		copy[k] = v
+	}
+	return copy
+}
+
+// JobDescriptions maps Namespace to a mapping of Job.ID to JobDescription
+type JobDescriptions map[string]JobNamespacedDescriptions
+
+// Add the Job to the JobDescriptions, creating maps as necessary
+func (j JobDescriptions) Add(job *Job, expected int) {
+	if j == nil {
+		j = make(JobDescriptions)
+	}
+	if j[job.Namespace] == nil {
+		j[job.Namespace] = make(JobNamespacedDescriptions)
+	}
+	j[job.Namespace][job.ID] = JobDescription{
+		Namespace: job.Namespace,
+		ID:        job.ID,
+		Expected:  expected,
+	}
+}
+
+// Count the Expected instances for all JobDescriptions
+func (j JobDescriptions) Count() int {
+	if j == nil {
+		return 0
+	}
+	count := 0
+	for _, jnd := range j {
+		for _, jd := range jnd {
+			count += jd.Expected
+		}
+	}
+	return count
+}
+
+// Delete the Job from the JobDescriptions
+func (j JobDescriptions) Delete(job *Job) {
+	if j != nil &&
+		j[job.Namespace] != nil {
+		delete(j[job.Namespace], job.ID)
+	}
+}
+
 type CSIPluginListStub struct {
 	ID                  string
 	Provider            string
@@ -879,16 +1053,20 @@ func (p *CSIPlugin) Stub() *CSIPluginListStub {
 		Provider:            p.Provider,
 		ControllerRequired:  p.ControllerRequired,
 		ControllersHealthy:  p.ControllersHealthy,
-		ControllersExpected: len(p.Controllers),
+		ControllersExpected: p.ControllersExpected,
 		NodesHealthy:        p.NodesHealthy,
-		NodesExpected:       len(p.Nodes),
+		NodesExpected:       p.NodesExpected,
 		CreateIndex:         p.CreateIndex,
 		ModifyIndex:         p.ModifyIndex,
 	}
 }
 
 func (p *CSIPlugin) IsEmpty() bool {
-	return len(p.Controllers) == 0 && len(p.Nodes) == 0
+	return p == nil ||
+		len(p.Controllers) == 0 &&
+			len(p.Nodes) == 0 &&
+			p.ControllerJobs.Count() == 0 &&
+			p.NodeJobs.Count() == 0
 }
 
 type CSIPluginListRequest struct {

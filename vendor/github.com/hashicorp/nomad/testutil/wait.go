@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/kr/pretty"
 	testing "github.com/mitchellh/go-testing-interface"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -91,6 +92,29 @@ func WaitForLeader(t testing.T, rpc rpcFn) {
 		return leader != "", err
 	}, func(err error) {
 		t.Fatalf("failed to find leader: %v", err)
+	})
+}
+
+// WaitForClient blocks until the client can be found
+func WaitForClient(t testing.T, rpc rpcFn, nodeID string) {
+	t.Helper()
+	WaitForResult(func() (bool, error) {
+		req := structs.NodeSpecificRequest{
+			NodeID:       nodeID,
+			QueryOptions: structs.QueryOptions{Region: "global"},
+		}
+		var out structs.SingleNodeResponse
+
+		err := rpc("Node.GetNode", &req, &out)
+		if err != nil {
+			return false, err
+		}
+		if out.Node == nil {
+			return false, fmt.Errorf("node not found")
+		}
+		return out.Node.Status == structs.NodeStatusReady, nil
+	}, func(err error) {
+		t.Fatalf("failed to find node: %v", err)
 	})
 }
 
@@ -189,4 +213,20 @@ func WaitForRunningWithToken(t testing.T, rpc rpcFn, job *structs.Job, token str
 // WaitForRunning runs a job and blocks until all allocs are out of pending.
 func WaitForRunning(t testing.T, rpc rpcFn, job *structs.Job) []*structs.AllocListStub {
 	return WaitForRunningWithToken(t, rpc, job, "")
+}
+
+// WaitForFiles blocks until all the files in the slice are present
+func WaitForFiles(t testing.T, files []string) {
+	assert := assert.New(t)
+	WaitForResult(func() (bool, error) {
+		for _, f := range files {
+			exists := assert.FileExists(f)
+			if !exists {
+				return false, fmt.Errorf("expected file to exist %s", f)
+			}
+		}
+		return true, nil
+	}, func(err error) {
+		t.Fatalf("missing expected files: %v", err)
+	})
 }
