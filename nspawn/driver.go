@@ -109,6 +109,7 @@ var (
 		"bind_read_only":    hclspec.NewAttr("bind_read_only", "list(map(string))", false),
 		"environment":       hclspec.NewAttr("environment", "list(map(string))", false),
 		"port_map":          hclspec.NewAttr("port_map", "list(map(number))", false),
+		"ports":             hclspec.NewAttr("ports", "list(string)", false),
 		"capability":        hclspec.NewAttr("capability", "list(string)", false),
 		"network_zone":      hclspec.NewAttr("network_zone", "string", false),
 	})
@@ -365,13 +366,37 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	// Setup port mapping and exposed ports
-	if cfg.Resources.NomadResources != nil {
-		if len(cfg.Resources.NomadResources.Networks) == 0 {
-			d.logger.Debug("no network interfaces are available")
-			if len(driverConfig.PortMap) > 0 {
-				d.logger.Error("Trying to map ports but no network interface is available")
+	if cfg.Resources != nil {
+		if len(driverConfig.PortMap) > 0 && len(driverConfig.Ports) > 0 {
+			d.logger.Error("Invalid port declaration; use of port_map and ports")
+			return nil, nil, fmt.Errorf("Invalid port declaration; use of port_map and ports")
+		}
+
+		if len(driverConfig.PortMap) > 0 && len(cfg.Resources.NomadResources.Networks) == 0 {
+			d.logger.Error("Trying to map ports but no network interface is available")
+			return nil, nil, fmt.Errorf("Trying to map ports but no network interface is available")
+		}
+
+		if len(driverConfig.Ports) > 0 && cfg.Resources.Ports == nil {
+			d.logger.Error("No ports defined in network stanza")
+			return nil, nil, fmt.Errorf("No ports defined in network stanza")
+		}
+
+		if len(driverConfig.Ports) > 0 {
+			for _ , port := range driverConfig.Ports {
+				p, ok := cfg.Resources.Ports.Get(port)
+				if !ok {
+					d.logger.Error("Port "+port+" not found, check network stanza")
+					return nil, nil, fmt.Errorf("Port %q not found, check network stanza", port)
+				}
+				to := p.To
+				if to == 0 {
+					to = p.Value
+				}
+				driverConfig.Port[port] = fmt.Sprintf("%d:%d", p.Value, to)
+				d.logger.Debug("exposed port", "port", p.Value, "to", to)
 			}
-		} else {
+		} else if len(driverConfig.PortMap) > 0 {
 			network := cfg.Resources.NomadResources.Networks[0]
 			for _, port := range network.ReservedPorts {
 				// By default we will map the allocated port 1:1 to the container
@@ -451,7 +476,7 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	}
 
 	d.logger.Info("starting nspawn task", "driver_cfg", hclog.Fmt("%+v", driverConfig))
-	d.logger.Debug("resources", "nomad", fmt.Sprintf("%+v", cfg.Resources.NomadResources), "linux", fmt.Sprintf("%+v", cfg.Resources.LinuxResources))
+	d.logger.Debug("resources", "nomad", fmt.Sprintf("%+v", cfg.Resources.NomadResources), "linux", fmt.Sprintf("%+v", cfg.Resources.LinuxResources), "ports", fmt.Sprintf("%+v", cfg.Resources.Ports))
 	d.logger.Info("commad arguments", "args", args)
 
 	executorConfig := &executor.ExecutorConfig{

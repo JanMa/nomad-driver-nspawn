@@ -73,6 +73,8 @@ type MachineConfig struct {
 	NetworkZone      string             `codec:"network_zone"`
 	PivotRoot        string             `codec:"pivot_root"`
 	Port             hclutils.MapStrStr `codec:"port"`
+	Ports            []string           `codec:"ports"` // :-(
+	// Deprecated: Nomad dropped support for task network resources in 0.12
 	PortMap          hclutils.MapStrInt `codec:"port_map"`
 	ProcessTwo       bool               `codec:"process_two"`
 	Properties       hclutils.MapStrStr `codec:"properties"`
