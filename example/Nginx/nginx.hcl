@@ -3,6 +3,12 @@ job "nginx" {
   type = "service"
   group "linux" {
     count = 1
+    network {
+      port "http" {
+        static = "8080"
+        to = "80"
+      }
+    }
     task "nginx" {
       driver = "nspawn"
       config {
@@ -11,16 +17,7 @@ job "nginx" {
         command = ["/bin/bash", "-c", "dhclient && nginx && tail -f /var/log/nginx/access.log " ]
         boot = false
         process_two = true
-        port_map {
-          http = 80
-        }
-      }
-      resources {
-        network {
-          port "http" {
-            static = "8080"
-          }
-        }
+        ports = ["http"]
       }
     }
   }
