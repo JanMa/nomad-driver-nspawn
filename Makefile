@@ -35,16 +35,16 @@ tidy: get
 vendor:	tidy
 		GO111MODULE=on go mod vendor -v
 
-nspawn.test: | .go115
+nspawn.test: *.go nspawn/*.go | .go115
 		go test -c ./nspawn
 
-test: | nspawn.test
+test: nspawn.test
 		sudo ./nspawn.test
 
-nspawn.cover: | .go115
+nspawn.cover: *.go nspawn/*.go | .go115
 		go test -cover -c ./nspawn -o nspawn.cover
 
-cover: | nspawn.cover
+cover: nspawn.cover
 		sudo ./nspawn.cover
 
 clean:
