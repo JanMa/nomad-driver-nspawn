@@ -137,7 +137,7 @@ should cover a broad range of use cases:
     }
   }
   ```
-* `port_map` - (Optional) A key-value map of port labels. Works the same way as
+* `port_map` - (Optional) **DEPRECATED** A key-value map of port labels. Works the same way as
   in the [docker
   driver](https://www.nomadproject.io/docs/drivers/docker.html#using-the-port-map).
   **Note:** `systemd-nspawn` will not expose ports to the loopback interface of
@@ -148,6 +148,17 @@ should cover a broad range of use cases:
     port_map {
       http = 80
     }
+  }
+  ```
+* `ports` - (Optional) A list of port labels. Works the same way as
+  in the [docker
+  driver](https://www.nomadproject.io/docs/drivers/docker#allocating-ports).
+  **Note:** `systemd-nspawn` will not expose ports to the loopback interface of
+  your host.
+
+  ```hcl
+  config {
+    ports = ["http"]
   }
   ```
 * [`capability`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--capability=) -
