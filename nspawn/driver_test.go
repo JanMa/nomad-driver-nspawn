@@ -11,6 +11,7 @@ import (
 	"time"
 
 	ctestutils "github.com/hashicorp/nomad/client/testutil"
+	"github.com/hashicorp/nomad/helper/pluginutils/hclutils"
 	"github.com/hashicorp/nomad/helper/testlog"
 	"github.com/hashicorp/nomad/helper/uuid"
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -370,4 +371,129 @@ func TestNspawnDriver_HandlerExec(t *testing.T) {
 
 	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
+}
+
+func TestNspawnDriver_PortMap(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	ctestutils.ExecCompatible(t)
+
+	d := NewNspawnDriver(testlog.HCLogger(t))
+	harness := dtestutil.NewDriverHarness(t, d)
+	task := &drivers.TaskConfig{
+		ID:        uuid.Generate(),
+		AllocID:   uuid.Generate(),
+		Name:      "port-map",
+		Resources: testResources,
+	}
+	cleanup := harness.MkAllocDir(task, true)
+	defer cleanup()
+
+	taskCfg := alpineConfig("")
+	taskCfg.PortMap = make(hclutils.MapStrInt)
+	taskCfg.PortMap["foo"] = 8080
+	taskCfg.PortMap["bar"] = 9090
+
+	require.NoError(task.EncodeConcreteDriverConfig(taskCfg))
+
+	// Test should fail because no network resources are defined
+	handle, _, err := harness.StartTask(task)
+	require.Error(err)
+	require.Nil(handle)
+
+	task.Resources.NomadResources.Networks = []*structs.NetworkResource{
+		{
+			IP: "127.0.0.1",
+			DynamicPorts: []structs.Port{
+				{Label: "foo", Value: 8080},
+				{Label: "bar", Value: 9090},
+			},
+		},
+	}
+
+	// Now the test should pass
+	handle, _, err = harness.StartTask(task)
+	require.NoError(err)
+	require.NotNil(handle)
+	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
+	require.NoError(harness.DestroyTask(task.ID, true))
+}
+
+func TestNspawnDriver_Ports(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	ctestutils.ExecCompatible(t)
+
+	d := NewNspawnDriver(testlog.HCLogger(t))
+	harness := dtestutil.NewDriverHarness(t, d)
+	task := &drivers.TaskConfig{
+		ID:        uuid.Generate(),
+		AllocID:   uuid.Generate(),
+		Name:      "ports",
+		Resources: testResources,
+	}
+	cleanup := harness.MkAllocDir(task, true)
+	defer cleanup()
+
+	taskCfg := alpineConfig("")
+	taskCfg.Ports = []string{"foo","bar"}
+
+	require.NoError(task.EncodeConcreteDriverConfig(taskCfg))
+
+	// Test should fail because no network resources are defined
+	handle, _, err := harness.StartTask(task)
+	require.Error(err)
+	require.Nil(handle)
+
+	task.Resources.Ports = &structs.AllocatedPorts{
+		{
+			Label:  "foo",
+			HostIP: "127.0.0.1",
+			Value:  54321,
+			To: 8080,
+		},
+		{
+			Label:  "bar",
+			HostIP: "127.0.0.1",
+			Value:  54320,
+			To: 9090,
+		},
+	}
+
+	// Now the test should pass
+	handle, _, err = harness.StartTask(task)
+	require.NoError(err)
+	require.NotNil(handle)
+	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
+	require.NoError(harness.DestroyTask(task.ID, true))
+}
+
+func TestNspawnDriver_PortsAndPortMap(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	ctestutils.ExecCompatible(t)
+
+	d := NewNspawnDriver(testlog.HCLogger(t))
+	harness := dtestutil.NewDriverHarness(t, d)
+	task := &drivers.TaskConfig{
+		ID:        uuid.Generate(),
+		AllocID:   uuid.Generate(),
+		Name:      "ports-port-map",
+		Resources: testResources,
+	}
+	cleanup := harness.MkAllocDir(task, true)
+	defer cleanup()
+
+	taskCfg := alpineConfig("")
+	taskCfg.Ports = []string{"foo","bar"}
+	taskCfg.PortMap = make(hclutils.MapStrInt)
+	taskCfg.PortMap["foo"] = 8080
+	taskCfg.PortMap["bar"] = 9090
+
+	require.NoError(task.EncodeConcreteDriverConfig(taskCfg))
+
+	// Test should fail because no network resources are defined
+	handle, _, err := harness.StartTask(task)
+	require.Error(err)
+	require.Nil(handle)
 }
