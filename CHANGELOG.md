@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0]
+## [Unreleased]
+### Added
+  - Support for group level network stanza
+### Fixed
+  - Ensure tests are always built on code changes
+  - Run "apt update" in Actions pipeline
+### Changed
+  - Adjust Nginx example to use group network stanza
+  - Update to Nomad v1.0.2
+
+## [0.5.0] - 2021-01-07
 ### Added
   - Support for running containers without private networking.
   - Support for running multiple containers in the same network-zone.
