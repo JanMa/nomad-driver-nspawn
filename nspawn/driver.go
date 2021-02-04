@@ -475,9 +475,9 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		return nil, nil, err
 	}
 
-	d.logger.Info("starting nspawn task", "driver_cfg", hclog.Fmt("%+v", driverConfig))
+	d.logger.Debug("starting nspawn task", "driver_cfg", hclog.Fmt("%+v", driverConfig))
 	d.logger.Debug("resources", "nomad", fmt.Sprintf("%+v", cfg.Resources.NomadResources), "linux", fmt.Sprintf("%+v", cfg.Resources.LinuxResources), "ports", fmt.Sprintf("%+v", cfg.Resources.Ports))
-	d.logger.Info("commad arguments", "args", args)
+	d.logger.Debug("commad arguments", "args", args)
 
 	executorConfig := &executor.ExecutorConfig{
 		LogFile:  filepath.Join(cfg.TaskDir().Dir, "executor.out"),
