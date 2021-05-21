@@ -118,6 +118,15 @@ func Node() *structs.Node {
 	return node
 }
 
+func DrainNode() *structs.Node {
+	node := Node()
+	node.DrainStrategy = &structs.DrainStrategy{
+		DrainSpec: structs.DrainSpec{},
+	}
+	node.Canonicalize()
+	return node
+}
+
 // NvidiaNode returns a node with two instances of an Nvidia GPU
 func NvidiaNode() *structs.Node {
 	n := Node()
@@ -875,7 +884,8 @@ func ConnectIngressGatewayJob(mode string, inject bool) *structs.Job {
 		Connect: &structs.ConsulConnect{
 			Gateway: &structs.ConsulGateway{
 				Proxy: &structs.ConsulGatewayProxy{
-					ConnectTimeout: helper.TimeToPtr(3 * time.Second),
+					ConnectTimeout:            helper.TimeToPtr(3 * time.Second),
+					EnvoyGatewayBindAddresses: make(map[string]*structs.ConsulGatewayBindAddress),
 				},
 				Ingress: &structs.ConsulIngressConfigEntry{
 					Listeners: []*structs.ConsulIngressListener{{
@@ -1082,6 +1092,26 @@ func Eval() *structs.Evaluation {
 	return eval
 }
 
+func BlockedEval() *structs.Evaluation {
+	e := Eval()
+	e.Status = structs.EvalStatusBlocked
+	e.FailedTGAllocs = map[string]*structs.AllocMetric{
+		"cache": {
+			DimensionExhausted: map[string]int{
+				"memory": 1,
+			},
+			ResourcesExhausted: map[string]*structs.Resources{
+				"redis": {
+					CPU:      100,
+					MemoryMB: 1024,
+				},
+			},
+		},
+	}
+
+	return e
+}
+
 func JobSummary(jobID string) *structs.JobSummary {
 	js := &structs.JobSummary{
 		JobID:     jobID,
@@ -1097,6 +1127,7 @@ func JobSummary(jobID string) *structs.JobSummary {
 }
 
 func Alloc() *structs.Allocation {
+	job := Job()
 	alloc := &structs.Allocation{
 		ID:        uuid.Generate(),
 		EvalID:    uuid.Generate(),
@@ -1162,7 +1193,7 @@ func Alloc() *structs.Allocation {
 				DiskMB: 150,
 			},
 		},
-		Job:           Job(),
+		Job:           job,
 		DesiredStatus: structs.AllocDesiredStatusRun,
 		ClientStatus:  structs.AllocClientStatusPending,
 	}
@@ -1256,9 +1287,7 @@ func BatchConnectJob() *structs.Job {
 		ModifyIndex:    99,
 		JobModifyIndex: 99,
 	}
-	if err := job.Canonicalize(); err != nil {
-		panic(err)
-	}
+	job.Canonicalize()
 	return job
 }
 

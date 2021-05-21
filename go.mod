@@ -8,7 +8,7 @@ require (
 	github.com/godbus/dbus v5.0.1+incompatible
 	github.com/hashicorp/consul-template v0.25.1
 	github.com/hashicorp/go-hclog v0.14.1
-	github.com/hashicorp/go-plugin v1.3.0
-	github.com/hashicorp/nomad v1.0.2
+	github.com/hashicorp/go-plugin v1.4.0
+	github.com/hashicorp/nomad v1.1.0
 	github.com/stretchr/testify v1.6.1
 )

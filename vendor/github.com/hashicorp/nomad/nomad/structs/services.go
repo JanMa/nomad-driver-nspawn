@@ -2,6 +2,7 @@ package structs
 
 import (
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -61,6 +62,8 @@ type ServiceCheck struct {
 	TaskName               string              // What task to execute this check in
 	SuccessBeforePassing   int                 // Number of consecutive successes required before considered healthy
 	FailuresBeforeCritical int                 // Number of consecutive failures required before considered unhealthy
+	Body                   string              // Body to use in HTTP check
+	OnUpdate               string
 }
 
 // Copy the stanza recursively. Returns nil if nil.
@@ -167,6 +170,14 @@ func (sc *ServiceCheck) Equals(o *ServiceCheck) bool {
 		return false
 	}
 
+	if sc.Body != o.Body {
+		return false
+	}
+
+	if sc.OnUpdate != o.OnUpdate {
+		return false
+	}
+
 	return true
 }
 
@@ -189,6 +200,10 @@ func (sc *ServiceCheck) Canonicalize(serviceName string) {
 
 	if sc.Name == "" {
 		sc.Name = fmt.Sprintf("service: %q check", serviceName)
+	}
+
+	if sc.OnUpdate == "" {
+		sc.OnUpdate = OnUpdateRequireHealthy
 	}
 }
 
@@ -254,6 +269,14 @@ func (sc *ServiceCheck) validate() error {
 		return fmt.Errorf("invalid address_mode %q", sc.AddressMode)
 	}
 
+	// Validate OnUpdate
+	switch sc.OnUpdate {
+	case "", OnUpdateIgnore, OnUpdateRequireHealthy, OnUpdateIgnoreWarn:
+		// OK
+	default:
+		return fmt.Errorf("on_update must be %q, %q, or %q; got %q", OnUpdateRequireHealthy, OnUpdateIgnoreWarn, OnUpdateIgnore, sc.OnUpdate)
+	}
+
 	// Note that we cannot completely validate the Expose field yet - we do not
 	// know whether this ServiceCheck belongs to a connect-enabled group-service.
 	// Instead, such validation will happen in a job admission controller.
@@ -281,6 +304,22 @@ func (sc *ServiceCheck) validate() error {
 		return fmt.Errorf("failures_before_critical must be non-negative")
 	} else if sc.FailuresBeforeCritical > 0 && !helper.SliceStringContains(passFailCheckTypes, sc.Type) {
 		return fmt.Errorf("failures_before_critical not supported for check of type %q", sc.Type)
+	}
+
+	// Check that CheckRestart and OnUpdate do not conflict
+	if sc.CheckRestart != nil {
+		// CheckRestart and OnUpdate Ignore are incompatible If OnUpdate treats
+		// an error has healthy, and the deployment succeeds followed by check
+		// restart restarting erroring checks, the deployment is left in an odd
+		// state
+		if sc.OnUpdate == OnUpdateIgnore {
+			return fmt.Errorf("on_update value %q is not compatible with check_restart", sc.OnUpdate)
+		}
+		// CheckRestart IgnoreWarnings must be true if a check has defined OnUpdate
+		// ignore_warnings
+		if !sc.CheckRestart.IgnoreWarnings && sc.OnUpdate == OnUpdateIgnoreWarn {
+			return fmt.Errorf("on_update value %q not supported with check_restart ignore_warnings value %q", sc.OnUpdate, strconv.FormatBool(sc.CheckRestart.IgnoreWarnings))
+		}
 	}
 
 	return sc.CheckRestart.Validate()
@@ -319,6 +358,8 @@ func (sc *ServiceCheck) Hash(serviceID string) string {
 	hashString(h, sc.Interval.String())
 	hashString(h, sc.Timeout.String())
 	hashString(h, sc.Method)
+	hashString(h, sc.Body)
+	hashString(h, sc.OnUpdate)
 
 	// use name "true" to maintain ID stability
 	hashBool(h, sc.TLSSkipVerify, "true")
@@ -417,7 +458,23 @@ type Service struct {
 	Connect    *ConsulConnect    // Consul Connect configuration
 	Meta       map[string]string // Consul service meta
 	CanaryMeta map[string]string // Consul service meta when it is a canary
+
+	// The consul namespace in which this service will be registered. Namespace
+	// at the service.check level is not part of the Nomad API - it must be
+	// set at the job or group level. This field is managed internally so
+	// that Hash can work correctly.
+	Namespace string
+
+	// OnUpdate Specifies how the service and its checks should be evaluated
+	// during an update
+	OnUpdate string
 }
+
+const (
+	OnUpdateRequireHealthy = "require_healthy"
+	OnUpdateIgnoreWarn     = "ignore_warnings"
+	OnUpdateIgnore         = "ignore"
+)
 
 // Copy the stanza recursively. Returns nil if nil.
 func (s *Service) Copy() *Service {
@@ -470,6 +527,12 @@ func (s *Service) Canonicalize(job string, taskGroup string, task string) {
 	for _, check := range s.Checks {
 		check.Canonicalize(s.Name)
 	}
+
+	// Consul API returns "default" whether the namespace is empty or set as
+	// such, so we coerce our copy of the service to be the same.
+	if s.Namespace == "" {
+		s.Namespace = "default"
+	}
 }
 
 // Validate checks if the Service definition is valid
@@ -490,6 +553,13 @@ func (s *Service) Validate() error {
 		// OK
 	default:
 		mErr.Errors = append(mErr.Errors, fmt.Errorf("Service address_mode must be %q, %q, or %q; not %q", AddressModeAuto, AddressModeHost, AddressModeDriver, s.AddressMode))
+	}
+
+	switch s.OnUpdate {
+	case "", OnUpdateIgnore, OnUpdateRequireHealthy, OnUpdateIgnoreWarn:
+		// OK
+	default:
+		mErr.Errors = append(mErr.Errors, fmt.Errorf("Service on_update must be %q, %q, or %q; not %q", OnUpdateRequireHealthy, OnUpdateIgnoreWarn, OnUpdateIgnore, s.OnUpdate))
 	}
 
 	// check checks
@@ -558,6 +628,8 @@ func (s *Service) Hash(allocID, taskName string, canary bool) string {
 	hashMeta(h, s.Meta)
 	hashMeta(h, s.CanaryMeta)
 	hashConnect(h, s.Connect)
+	hashString(h, s.OnUpdate)
+	hashString(h, s.Namespace)
 
 	// Base32 is used for encoding the hash as sha1 hashes can always be
 	// encoded without padding, only 4 bytes larger than base64, and saves
@@ -578,6 +650,7 @@ func hashConnect(h hash.Hash, connect *ConsulConnect) {
 				hashString(h, upstream.DestinationName)
 				hashString(h, strconv.Itoa(upstream.LocalBindPort))
 				hashStringIfNonEmpty(h, upstream.Datacenter)
+				hashStringIfNonEmpty(h, upstream.LocalBindAddress)
 			}
 		}
 	}
@@ -613,7 +686,15 @@ func (s *Service) Equals(o *Service) bool {
 		return s == o
 	}
 
+	if s.Namespace != o.Namespace {
+		return false
+	}
+
 	if s.AddressMode != o.AddressMode {
+		return false
+	}
+
+	if s.OnUpdate != o.OnUpdate {
 		return false
 	}
 
@@ -733,10 +814,22 @@ func (c *ConsulConnect) IsNative() bool {
 	return c != nil && c.Native
 }
 
-// IsGateway checks if the service is a Connect gateway.
+// IsGateway checks if the service is any type of connect gateway.
 func (c *ConsulConnect) IsGateway() bool {
 	return c != nil && c.Gateway != nil
 }
+
+// IsIngress checks if the service is an ingress gateway.
+func (c *ConsulConnect) IsIngress() bool {
+	return c.IsGateway() && c.Gateway.Ingress != nil
+}
+
+// IsTerminating checks if the service is a terminating gateway.
+func (c *ConsulConnect) IsTerminating() bool {
+	return c.IsGateway() && c.Gateway.Terminating != nil
+}
+
+// also mesh
 
 // Validate that the Connect block represents exactly one of:
 // - Connect non-native service sidecar proxy
@@ -791,6 +884,10 @@ type ConsulSidecarService struct {
 
 	// Proxy stanza defining the sidecar proxy configuration.
 	Proxy *ConsulProxy
+
+	// DisableDefaultTCPCheck, if true, instructs Nomad to avoid setting a
+	// default TCP check for the sidecar service.
+	DisableDefaultTCPCheck bool
 }
 
 // HasUpstreams checks if the sidecar service has any upstreams configured
@@ -804,9 +901,10 @@ func (s *ConsulSidecarService) Copy() *ConsulSidecarService {
 		return nil
 	}
 	return &ConsulSidecarService{
-		Tags:  helper.CopySliceString(s.Tags),
-		Port:  s.Port,
-		Proxy: s.Proxy.Copy(),
+		Tags:                   helper.CopySliceString(s.Tags),
+		Port:                   s.Port,
+		Proxy:                  s.Proxy.Copy(),
+		DisableDefaultTCPCheck: s.DisableDefaultTCPCheck,
 	}
 }
 
@@ -817,6 +915,10 @@ func (s *ConsulSidecarService) Equals(o *ConsulSidecarService) bool {
 	}
 
 	if s.Port != o.Port {
+		return false
+	}
+
+	if s.DisableDefaultTCPCheck != o.DisableDefaultTCPCheck {
 		return false
 	}
 
@@ -1130,6 +1232,10 @@ type ConsulUpstream struct {
 
 	// Datacenter is the datacenter in which to issue the discovery query to.
 	Datacenter string
+
+	// LocalBindAddress is the address the proxy will receive connections for the
+	// upstream on.
+	LocalBindAddress string
 }
 
 func upstreamsEquals(a, b []ConsulUpstream) bool {
@@ -1156,9 +1262,10 @@ func (u *ConsulUpstream) Copy() *ConsulUpstream {
 	}
 
 	return &ConsulUpstream{
-		DestinationName: u.DestinationName,
-		LocalBindPort:   u.LocalBindPort,
-		Datacenter:      u.Datacenter,
+		DestinationName:  u.DestinationName,
+		LocalBindPort:    u.LocalBindPort,
+		Datacenter:       u.Datacenter,
+		LocalBindAddress: u.LocalBindAddress,
 	}
 }
 
@@ -1231,11 +1338,21 @@ type ConsulGateway struct {
 	// Ingress represents the Consul Configuration Entry for an Ingress Gateway.
 	Ingress *ConsulIngressConfigEntry
 
-	// Terminating is not yet supported.
-	// Terminating *ConsulTerminatingConfigEntry
+	// Terminating represents the Consul Configuration Entry for a Terminating Gateway.
+	Terminating *ConsulTerminatingConfigEntry
 
 	// Mesh is not yet supported.
 	// Mesh *ConsulMeshConfigEntry
+}
+
+func (g *ConsulGateway) Prefix() string {
+	switch {
+	case g.Ingress != nil:
+		return ConnectIngressPrefix
+	default:
+		return ConnectTerminatingPrefix
+	}
+	// also mesh
 }
 
 func (g *ConsulGateway) Copy() *ConsulGateway {
@@ -1244,8 +1361,9 @@ func (g *ConsulGateway) Copy() *ConsulGateway {
 	}
 
 	return &ConsulGateway{
-		Proxy:   g.Proxy.Copy(),
-		Ingress: g.Ingress.Copy(),
+		Proxy:       g.Proxy.Copy(),
+		Ingress:     g.Ingress.Copy(),
+		Terminating: g.Terminating.Copy(),
 	}
 }
 
@@ -1262,6 +1380,10 @@ func (g *ConsulGateway) Equals(o *ConsulGateway) bool {
 		return false
 	}
 
+	if !g.Terminating.Equals(o.Terminating) {
+		return false
+	}
+
 	return true
 }
 
@@ -1270,18 +1392,30 @@ func (g *ConsulGateway) Validate() error {
 		return nil
 	}
 
-	if g.Proxy != nil {
-		if err := g.Proxy.Validate(); err != nil {
-			return err
-		}
+	if err := g.Proxy.Validate(); err != nil {
+		return err
 	}
 
-	// eventually one of: ingress, terminating, mesh
+	if err := g.Ingress.Validate(); err != nil {
+		return err
+	}
+
+	if err := g.Terminating.Validate(); err != nil {
+		return err
+	}
+
+	// Exactly 1 of ingress/terminating/mesh(soon) must be set.
+	count := 0
 	if g.Ingress != nil {
-		return g.Ingress.Validate()
+		count++
 	}
-
-	return fmt.Errorf("Consul Gateway ingress Configuration Entry must be set")
+	if g.Terminating != nil {
+		count++
+	}
+	if count != 1 {
+		return fmt.Errorf("One Consul Gateway Configuration Entry must be set")
+	}
+	return nil
 }
 
 // ConsulGatewayBindAddress is equivalent to Consul's api/catalog.go ServiceAddress
@@ -1328,7 +1462,7 @@ func (a *ConsulGatewayBindAddress) Validate() error {
 		return fmt.Errorf("Consul Gateway Bind Address must be set")
 	}
 
-	if a.Port <= 0 {
+	if a.Port <= 0 && a.Port != -1 { // port -1 => nomad autofill
 		return fmt.Errorf("Consul Gateway Bind Address must set valid Port")
 	}
 
@@ -1344,6 +1478,7 @@ type ConsulGatewayProxy struct {
 	EnvoyGatewayBindTaggedAddresses bool
 	EnvoyGatewayBindAddresses       map[string]*ConsulGatewayBindAddress
 	EnvoyGatewayNoDefaultBind       bool
+	EnvoyDNSDiscoveryType           string
 	Config                          map[string]interface{}
 }
 
@@ -1352,18 +1487,27 @@ func (p *ConsulGatewayProxy) Copy() *ConsulGatewayProxy {
 		return nil
 	}
 
+	return &ConsulGatewayProxy{
+		ConnectTimeout:                  helper.TimeToPtr(*p.ConnectTimeout),
+		EnvoyGatewayBindTaggedAddresses: p.EnvoyGatewayBindTaggedAddresses,
+		EnvoyGatewayBindAddresses:       p.copyBindAddresses(),
+		EnvoyGatewayNoDefaultBind:       p.EnvoyGatewayNoDefaultBind,
+		EnvoyDNSDiscoveryType:           p.EnvoyDNSDiscoveryType,
+		Config:                          helper.CopyMapStringInterface(p.Config),
+	}
+}
+
+func (p *ConsulGatewayProxy) copyBindAddresses() map[string]*ConsulGatewayBindAddress {
+	if p.EnvoyGatewayBindAddresses == nil {
+		return nil
+	}
+
 	bindAddresses := make(map[string]*ConsulGatewayBindAddress, len(p.EnvoyGatewayBindAddresses))
 	for k, v := range p.EnvoyGatewayBindAddresses {
 		bindAddresses[k] = v.Copy()
 	}
 
-	return &ConsulGatewayProxy{
-		ConnectTimeout:                  helper.TimeToPtr(*p.ConnectTimeout),
-		EnvoyGatewayBindTaggedAddresses: p.EnvoyGatewayBindTaggedAddresses,
-		EnvoyGatewayBindAddresses:       bindAddresses,
-		EnvoyGatewayNoDefaultBind:       p.EnvoyGatewayNoDefaultBind,
-		Config:                          helper.CopyMapStringInterface(p.Config),
-	}
+	return bindAddresses
 }
 
 func (p *ConsulGatewayProxy) equalBindAddresses(o map[string]*ConsulGatewayBindAddress) bool {
@@ -1401,12 +1545,21 @@ func (p *ConsulGatewayProxy) Equals(o *ConsulGatewayProxy) bool {
 		return false
 	}
 
+	if p.EnvoyDNSDiscoveryType != o.EnvoyDNSDiscoveryType {
+		return false
+	}
+
 	if !opaqueMapsEqual(p.Config, o.Config) {
 		return false
 	}
 
 	return true
 }
+
+const (
+	strictDNS  = "STRICT_DNS"
+	logicalDNS = "LOGICAL_DNS"
+)
 
 func (p *ConsulGatewayProxy) Validate() error {
 	if p == nil {
@@ -1415,6 +1568,14 @@ func (p *ConsulGatewayProxy) Validate() error {
 
 	if p.ConnectTimeout == nil {
 		return fmt.Errorf("Consul Gateway Proxy connection_timeout must be set")
+	}
+
+	switch p.EnvoyDNSDiscoveryType {
+	case "", strictDNS, logicalDNS:
+		// Consul defaults to logical DNS, suitable for large scale workloads.
+		// https://www.envoyproxy.io/docs/envoy/v1.16.1/intro/arch_overview/upstream/service_discovery
+	default:
+		return fmt.Errorf("Consul Gateway Proxy Envoy DNS Discovery type must be %s or %s", strictDNS, logicalDNS)
 	}
 
 	for _, bindAddr := range p.EnvoyGatewayBindAddresses {
@@ -1494,13 +1655,29 @@ func (s *ConsulIngressService) Validate(isHTTP bool) error {
 	}
 
 	if s.Name == "" {
-		return fmt.Errorf("Consul Ingress Service requires a name")
+		return errors.New("Consul Ingress Service requires a name")
 	}
 
-	if isHTTP && len(s.Hosts) == 0 {
-		return fmt.Errorf("Consul Ingress Service requires one or more hosts when using HTTP protocol")
-	} else if !isHTTP && len(s.Hosts) > 0 {
-		return fmt.Errorf("Consul Ingress Service supports hosts only when using HTTP protocol")
+	// Validation of wildcard service name and hosts varies on whether the protocol
+	// for the gateway is HTTP.
+	// https://www.consul.io/docs/connect/config-entries/ingress-gateway#hosts
+	switch isHTTP {
+	case true:
+		if s.Name == "*" {
+			return nil
+		}
+
+		if len(s.Hosts) == 0 {
+			return errors.New("Consul Ingress Service requires one or more hosts when using HTTP protocol")
+		}
+	case false:
+		if s.Name == "*" {
+			return errors.New("Consul Ingress Service supports wildcard names only with HTTP protocol")
+		}
+
+		if len(s.Hosts) > 0 {
+			return errors.New("Consul Ingress Service supports hosts only when using HTTP protocol")
+		}
 	}
 
 	return nil
@@ -1670,4 +1847,144 @@ COMPARE: // order does not matter
 		return false
 	}
 	return true
+}
+
+type ConsulLinkedService struct {
+	Name     string
+	CAFile   string
+	CertFile string
+	KeyFile  string
+	SNI      string
+}
+
+func (s *ConsulLinkedService) Copy() *ConsulLinkedService {
+	if s == nil {
+		return nil
+	}
+
+	return &ConsulLinkedService{
+		Name:     s.Name,
+		CAFile:   s.CAFile,
+		CertFile: s.CertFile,
+		KeyFile:  s.KeyFile,
+		SNI:      s.SNI,
+	}
+}
+
+func (s *ConsulLinkedService) Equals(o *ConsulLinkedService) bool {
+	if s == nil || o == nil {
+		return s == o
+	}
+
+	switch {
+	case s.Name != o.Name:
+		return false
+	case s.CAFile != o.CAFile:
+		return false
+	case s.CertFile != o.CertFile:
+		return false
+	case s.KeyFile != o.KeyFile:
+		return false
+	case s.SNI != o.SNI:
+		return false
+	}
+
+	return true
+}
+
+func (s *ConsulLinkedService) Validate() error {
+	if s == nil {
+		return nil
+	}
+
+	if s.Name == "" {
+		return fmt.Errorf("Consul Linked Service requires Name")
+	}
+
+	caSet := s.CAFile != ""
+	certSet := s.CertFile != ""
+	keySet := s.KeyFile != ""
+	sniSet := s.SNI != ""
+
+	if (certSet || keySet) && !caSet {
+		return fmt.Errorf("Consul Linked Service TLS requires CAFile")
+	}
+
+	if certSet != keySet {
+		return fmt.Errorf("Consul Linked Service TLS Cert and Key must both be set")
+	}
+
+	if sniSet && !caSet {
+		return fmt.Errorf("Consul Linked Service TLS SNI requires CAFile")
+	}
+
+	return nil
+}
+
+func linkedServicesEqual(servicesA, servicesB []*ConsulLinkedService) bool {
+	if len(servicesA) != len(servicesB) {
+		return false
+	}
+
+COMPARE: // order does not matter
+	for _, serviceA := range servicesA {
+		for _, serviceB := range servicesB {
+			if serviceA.Equals(serviceB) {
+				continue COMPARE
+			}
+		}
+		return false
+	}
+	return true
+}
+
+type ConsulTerminatingConfigEntry struct {
+	// Namespace is not yet supported.
+	// Namespace string
+
+	Services []*ConsulLinkedService
+}
+
+func (e *ConsulTerminatingConfigEntry) Copy() *ConsulTerminatingConfigEntry {
+	if e == nil {
+		return nil
+	}
+
+	var services []*ConsulLinkedService = nil
+	if n := len(e.Services); n > 0 {
+		services = make([]*ConsulLinkedService, n)
+		for i := 0; i < n; i++ {
+			services[i] = e.Services[i].Copy()
+		}
+	}
+
+	return &ConsulTerminatingConfigEntry{
+		Services: services,
+	}
+}
+
+func (e *ConsulTerminatingConfigEntry) Equals(o *ConsulTerminatingConfigEntry) bool {
+	if e == nil || o == nil {
+		return e == o
+	}
+
+	return linkedServicesEqual(e.Services, o.Services)
+}
+
+func (e *ConsulTerminatingConfigEntry) Validate() error {
+	if e == nil {
+		return nil
+	}
+
+	if len(e.Services) == 0 {
+		return fmt.Errorf("Consul Terminating Gateway requires at least one service")
+	}
+
+	for _, service := range e.Services {
+		if err := service.Validate(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
