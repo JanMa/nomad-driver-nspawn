@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+  - Update to Nomad v1.1.0
   - Lower log level of passed arguments to systemd-nspawn to DEBUG
 
 ## [0.6.0] - 2021-01-19

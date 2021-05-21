@@ -18,33 +18,28 @@ import (
 
 // MergeMultierrorWarnings takes job warnings and canonicalize warnings and
 // merges them into a returnable string. Both the errors may be nil.
-func MergeMultierrorWarnings(warnings ...error) string {
-	var warningMsg multierror.Error
-	for _, warn := range warnings {
-		if warn != nil {
-			multierror.Append(&warningMsg, warn)
-		}
-	}
-
-	if len(warningMsg.Errors) == 0 {
+func MergeMultierrorWarnings(errs ...error) string {
+	if len(errs) == 0 {
 		return ""
 	}
 
-	// Set the formatter
-	warningMsg.ErrorFormat = warningsFormatter
-	return warningMsg.Error()
+	var mErr multierror.Error
+	_ = multierror.Append(&mErr, errs...)
+	mErr.ErrorFormat = warningsFormatter
+
+	return mErr.Error()
 }
 
 // warningsFormatter is used to format job warnings
 func warningsFormatter(es []error) string {
-	points := make([]string, len(es))
-	for i, err := range es {
-		points[i] = fmt.Sprintf("* %s", err)
+	sb := strings.Builder{}
+	sb.WriteString(fmt.Sprintf("%d warning(s):\n", len(es)))
+
+	for i := range es {
+		sb.WriteString(fmt.Sprintf("\n* %s", es[i]))
 	}
 
-	return fmt.Sprintf(
-		"%d warning(s):\n\n%s",
-		len(es), strings.Join(points, "\n"))
+	return sb.String()
 }
 
 // RemoveAllocs is used to remove any allocs with the given IDs
@@ -103,6 +98,9 @@ func AllocsFit(node *Node, allocs []*Allocation, netIdx *NetworkIndex, checkDevi
 	// Compute the allocs' utilization from zero
 	used := new(ComparableResources)
 
+	reservedCores := map[uint16]struct{}{}
+	var coreOverlap bool
+
 	// For each alloc, add the resources
 	for _, alloc := range allocs {
 		// Do not consider the resource impact of terminal allocations
@@ -110,7 +108,21 @@ func AllocsFit(node *Node, allocs []*Allocation, netIdx *NetworkIndex, checkDevi
 			continue
 		}
 
-		used.Add(alloc.ComparableResources())
+		cr := alloc.ComparableResources()
+		used.Add(cr)
+
+		// Adding the comparable resource unions reserved core sets, need to check if reserved cores overlap
+		for _, core := range cr.Flattened.Cpu.ReservedCores {
+			if _, ok := reservedCores[core]; ok {
+				coreOverlap = true
+			} else {
+				reservedCores[core] = struct{}{}
+			}
+		}
+	}
+
+	if coreOverlap {
+		return false, "cores", used, nil
 	}
 
 	// Check that the node resources (after subtracting reserved) are a
@@ -334,6 +346,17 @@ func AllocName(job, group string, idx uint) string {
 	return fmt.Sprintf("%s.%s[%d]", job, group, idx)
 }
 
+// AllocSuffix returns the alloc index suffix that was added by the AllocName
+// function above.
+func AllocSuffix(name string) string {
+	idx := strings.LastIndex(name, "[")
+	if idx == -1 {
+		return ""
+	}
+	suffix := name[idx:]
+	return suffix
+}
+
 // ACLPolicyListHash returns a consistent hash for a set of policies.
 func ACLPolicyListHash(policies []*ACLPolicy) string {
 	cacheKeyHash, err := blake2b.New256(nil)
@@ -341,8 +364,8 @@ func ACLPolicyListHash(policies []*ACLPolicy) string {
 		panic(err)
 	}
 	for _, policy := range policies {
-		cacheKeyHash.Write([]byte(policy.Name))
-		binary.Write(cacheKeyHash, binary.BigEndian, policy.ModifyIndex)
+		_, _ = cacheKeyHash.Write([]byte(policy.Name))
+		_ = binary.Write(cacheKeyHash, binary.BigEndian, policy.ModifyIndex)
 	}
 	cacheKey := string(cacheKeyHash.Sum(nil))
 	return cacheKey
@@ -390,7 +413,9 @@ func GenerateMigrateToken(allocID, nodeSecretID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	h.Write([]byte(allocID))
+
+	_, _ = h.Write([]byte(allocID))
+
 	return base64.URLEncoding.EncodeToString(h.Sum(nil)), nil
 }
 
@@ -401,7 +426,8 @@ func CompareMigrateToken(allocID, nodeSecretID, otherMigrateToken string) bool {
 	if err != nil {
 		return false
 	}
-	h.Write([]byte(allocID))
+
+	_, _ = h.Write([]byte(allocID))
 
 	otherBytes, err := base64.URLEncoding.DecodeString(otherMigrateToken)
 	if err != nil {
