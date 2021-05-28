@@ -361,8 +361,13 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		driverConfig.Properties = make(hclutils.MapStrStr)
 	}
 
-	if cfg.Resources.LinuxResources != nil {
-		driverConfig.Properties["MemoryMax"] = strconv.Itoa(int(cfg.Resources.LinuxResources.MemoryLimitBytes))
+	if cfg.Resources.NomadResources != nil {
+		if cfg.Resources.NomadResources.Memory.MemoryMaxMB != 0 {
+			driverConfig.Properties["MemoryHigh"] = strconv.Itoa(int(cfg.Resources.NomadResources.Memory.MemoryMB * 1024 * 1024))
+			driverConfig.Properties["MemoryMax"] = strconv.Itoa(int(cfg.Resources.NomadResources.Memory.MemoryMaxMB * 1024 * 1024))
+		} else {
+			driverConfig.Properties["MemoryMax"] = strconv.Itoa(int(cfg.Resources.NomadResources.Memory.MemoryMB * 1024 * 1024))
+		}
 	}
 
 	// Setup port mapping and exposed ports
@@ -383,10 +388,10 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 		}
 
 		if len(driverConfig.Ports) > 0 {
-			for _ , port := range driverConfig.Ports {
+			for _, port := range driverConfig.Ports {
 				p, ok := cfg.Resources.Ports.Get(port)
 				if !ok {
-					d.logger.Error("Port "+port+" not found, check network stanza")
+					d.logger.Error("Port " + port + " not found, check network stanza")
 					return nil, nil, fmt.Errorf("Port %q not found, check network stanza", port)
 				}
 				to := p.To
