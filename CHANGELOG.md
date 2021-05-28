@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+  - Support for new `memory_max` setting
 ### Changed
   - Update to Nomad v1.1.0
   - Lower log level of passed arguments to systemd-nspawn to DEBUG
