@@ -171,7 +171,7 @@ type TaskState struct {
 	StartedAt      time.Time
 }
 
-// NewNspawnDriver returns a new nspawn driver object
+// NewNspawnDriver returns a new DriverPlugin implementation
 func NewNspawnDriver(logger hclog.Logger) drivers.DriverPlugin {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger = logger.Named(pluginName)
@@ -188,13 +188,53 @@ func NewNspawnDriver(logger hclog.Logger) drivers.DriverPlugin {
 	}
 }
 
+// PluginInfo returns metadata about the nspawn driver plugin
+func (d *Driver) PluginInfo() (*base.PluginInfoResponse, error) {
+	return pluginInfo, nil
+}
+
+// ConfigSchema function allows a plugin to tell Nomad the schema for its configuration.
+// This configuration is given in a plugin block of the client configuration.
+// The schema is defined with the hclspec package.
+func (d *Driver) ConfigSchema() (*hclspec.Spec, error) {
+	return configSpec, nil
+}
+
+// SetConfig function is called when starting the plugin for the first time.
+// The Config given has two different configuration fields. The first PluginConfig,
+// is an encoded configuration from the plugin block of the client config.
+// The second, AgentConfig, is the Nomad agent's configuration which is given to all plugins.
+func (d *Driver) SetConfig(cfg *base.Config) error {
+	var config Config
+	if len(cfg.PluginConfig) != 0 {
+		if err := base.MsgPackDecode(cfg.PluginConfig, &config); err != nil {
+			return err
+		}
+	}
+
+	d.config = &config
+	if cfg.AgentConfig != nil {
+		d.nomadConfig = cfg.AgentConfig.Driver
+	}
+
+	return nil
+}
+
+// TaskConfigSchema returns the schema for the driver configuration of the task.
 func (d *Driver) TaskConfigSchema() (*hclspec.Spec, error) {
 	return taskConfigSpec, nil
 }
+
+// Capabilities define what features the driver implements.
 func (d *Driver) Capabilities() (*drivers.Capabilities, error) {
 	return capabilities, nil
 }
 
+// Fingerprint is called by the client when the plugin is started.
+// It allows the driver to indicate its health to the client.
+// The channel returned should immediately send an initial Fingerprint,
+// then send periodic updates at an interval that is appropriate for the driver
+// until the context is canceled.	
 func (d *Driver) Fingerprint(ctx context.Context) (<-chan *drivers.Fingerprint, error) {
 	ch := make(chan *drivers.Fingerprint)
 	go d.handleFingerprint(ctx, ch)
@@ -222,15 +262,15 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 	var desc string
 	attrs := map[string]*pstructs.Attribute{}
 
-	err := isInstalled()
-	version, vErr := systemdVersion()
+	errSystemd := isSystemdInstalled()
+	systemdVersion, vErr := systemdVersion()
 
-	if d.config.Enabled && err == nil && vErr == nil &&
+	if d.config.Enabled && errSystemd == nil && vErr == nil &&
 		driversUtil.IsUnixRoot() {
 		health = drivers.HealthStateHealthy
 		desc = "ready"
 		attrs["driver.nspawn"] = pstructs.NewBoolAttribute(true)
-		attrs["driver.nspawn.version"] = pstructs.NewStringAttribute(version)
+		attrs["driver.nspawn.version"] = pstructs.NewStringAttribute(systemdVersion)
 		attrs["driver.nspawn.volumes"] = pstructs.NewBoolAttribute(d.config.Volumes)
 	} else {
 		health = drivers.HealthStateUndetected
@@ -244,6 +284,11 @@ func (d *Driver) buildFingerprint() *drivers.Fingerprint {
 	}
 }
 
+// RecoverTask detects running tasks when nomad client or task driver is restarted.
+// When a driver is restarted it is not expected to persist any internal state to disk.
+// To support this, Nomad will attempt to recover a task that was previously started
+// if the driver does not recognize the task ID. During task recovery,
+// Nomad calls RecoverTask passing the TaskHandle that was returned by the StartTask function.
 func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 	d.logger.Debug("RecoverTask called")
 	if handle == nil {
@@ -299,6 +344,7 @@ func (d *Driver) RecoverTask(handle *drivers.TaskHandle) error {
 	return nil
 }
 
+// StartTask creates and starts a new nspawn Container based on the given TaskConfig.
 func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drivers.DriverNetwork, error) {
 	d.logger.Debug("StartTask called")
 	if _, ok := d.tasks.Get(cfg.ID); ok {
@@ -631,6 +677,12 @@ func (d *Driver) StartTask(cfg *drivers.TaskConfig) (*drivers.TaskHandle, *drive
 	return handle, network, nil
 }
 
+// WaitTask function is expected to return a channel that will send an *ExitResult when the task
+// exits or close the channel when the context is canceled. It is also expected that calling
+// WaitTask on an exited task will immediately send an *ExitResult on the returned channel.
+// A call to WaitTask after StopTask is valid and should be handled.
+// If WaitTask is called after DestroyTask, it should return drivers.ErrTaskNotFound as no task
+// state should exist after DestroyTask is called.
 func (d *Driver) WaitTask(ctx context.Context, taskID string) (<-chan *drivers.ExitResult, error) {
 	d.logger.Debug("WaitTask called")
 	handle, ok := d.tasks.Get(taskID)
@@ -671,6 +723,9 @@ func (d *Driver) handleWait(ctx context.Context, handle *taskHandle, ch chan *dr
 	}
 }
 
+// StopTask function is expected to stop a running task by sending the given signal to it.
+// If the task does not stop during the given timeout, the driver must forcefully kill the task.
+// StopTask does not clean up resources of the task or remove it from the driver's internal state.
 func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) error {
 	d.logger.Debug("StopTask called")
 	handle, ok := d.tasks.Get(taskID)
@@ -695,6 +750,8 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 	return nil
 }
 
+// DestroyTask function cleans up and removes a task that has terminated.
+// If force is set to true, the driver must destroy the task even if it is still running.
 func (d *Driver) DestroyTask(taskID string, force bool) error {
 	d.logger.Debug("DestroyTask called")
 	handle, ok := d.tasks.Get(taskID)
@@ -714,6 +771,7 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 	return nil
 }
 
+// InspectTask function returns detailed status information for the referenced taskID.
 func (d *Driver) InspectTask(taskID string) (*drivers.TaskStatus, error) {
 	d.logger.Debug("InspectTask called")
 	handle, ok := d.tasks.Get(taskID)
@@ -724,6 +782,8 @@ func (d *Driver) InspectTask(taskID string) (*drivers.TaskStatus, error) {
 	return handle.TaskStatus(), nil
 }
 
+// TaskStats function returns a channel which the driver should send stats to at the given interval.
+// The driver must send stats at the given interval until the given context is canceled or the task terminates.
 func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Duration) (<-chan *drivers.TaskResourceUsage, error) {
 	handle, ok := d.tasks.Get(taskID)
 	if !ok {
@@ -733,10 +793,14 @@ func (d *Driver) TaskStats(ctx context.Context, taskID string, interval time.Dur
 	return handle.exec.Stats(ctx, interval)
 }
 
+// TaskEvents function allows the driver to publish driver specific events about tasks and
+// the Nomad client publishes events associated with an allocation.
 func (d *Driver) TaskEvents(ctx context.Context) (<-chan *drivers.TaskEvent, error) {
 	return d.eventer.TaskEvents(ctx)
 }
 
+// SignalTask function is used by drivers which support sending OS signals (SIGHUP, SIGKILL, SIGUSR1 etc.) to the task.
+// It is an optional function and is listed as a capability in the driver Capabilities struct.
 func (d *Driver) SignalTask(taskID string, signal string) error {
 	d.logger.Debug("SignalTask called")
 	handle, ok := d.tasks.Get(taskID)
@@ -753,39 +817,7 @@ func (d *Driver) SignalTask(taskID string, signal string) error {
 	return handle.exec.Signal(sig)
 }
 
-// var _ drivers.ExecTaskStreamingDriver = (*Driver)(nil)
-var _ drivers.ExecTaskStreamingRawDriver = (*Driver)(nil)
-
-func (d *Driver) ExecTaskStreamingRaw(ctx context.Context,
-	taskID string,
-	command []string,
-	tty bool,
-	stream drivers.ExecTaskStream) error {
-
-	if len(command) == 0 {
-		return fmt.Errorf("error cmd must have at least one value")
-	}
-	handle, ok := d.tasks.Get(taskID)
-	if !ok {
-		return drivers.ErrTaskNotFound
-	}
-
-	if err := execSupported(handle); err != nil {
-		return err
-	}
-
-	cmd := []string{"systemd-run", "--wait", "--service-type=exec",
-		"--collect", "--quiet", "--machine", handle.machine.Name}
-	if tty {
-		cmd = append(cmd, "--pty", "--send-sighup")
-	} else {
-		cmd = append(cmd, "--pipe")
-	}
-	cmd = append(cmd, command...)
-
-	return handle.exec.ExecStreaming(ctx, cmd, tty, stream)
-}
-
+// ExecTask function is used by the Nomad client to execute scripted health checks inside the task execution context.
 func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*drivers.ExecTaskResult, error) {
 	if len(cmd) == 0 {
 		return nil, fmt.Errorf("error cmd must have at least one value")
@@ -816,6 +848,41 @@ func (d *Driver) ExecTask(taskID string, cmd []string, timeout time.Duration) (*
 	}, nil
 }
 
+// var _ drivers.ExecTaskStreamingDriver = (*Driver)(nil)
+var _ drivers.ExecTaskStreamingRawDriver = (*Driver)(nil)
+
+// ExecTaskStreamingRaw function is used by the Nomad client to execute commands inside the task execution context.
+// i.E. nomad alloc exec ....
+func (d *Driver) ExecTaskStreamingRaw(ctx context.Context,
+	taskID string,
+	command []string,
+	tty bool,
+	stream drivers.ExecTaskStream) error {
+
+	if len(command) == 0 {
+		return fmt.Errorf("error cmd must have at least one value")
+	}
+	handle, ok := d.tasks.Get(taskID)
+	if !ok {
+		return drivers.ErrTaskNotFound
+	}
+
+	if err := execSupported(handle); err != nil {
+		return err
+	}
+
+	cmd := []string{"systemd-run", "--wait", "--service-type=exec",
+		"--collect", "--quiet", "--machine", handle.machine.Name}
+	if tty {
+		cmd = append(cmd, "--pty", "--send-sighup")
+	} else {
+		cmd = append(cmd, "--pipe")
+	}
+	cmd = append(cmd, command...)
+
+	return handle.exec.ExecStreaming(ctx, cmd, tty, stream)
+}
+
 // execSupported checks if container was stared with boot parameter, otherwise
 // systemd-run does not work
 func execSupported(handle *taskHandle) error {
@@ -826,30 +893,6 @@ func execSupported(handle *taskHandle) error {
 	if !driverConfig.Boot {
 		return fmt.Errorf("cannot exec command in task started without boot parameter")
 	}
-	return nil
-}
-
-func (d *Driver) PluginInfo() (*base.PluginInfoResponse, error) {
-	return pluginInfo, nil
-}
-
-func (d *Driver) ConfigSchema() (*hclspec.Spec, error) {
-	return configSpec, nil
-}
-
-func (d *Driver) SetConfig(cfg *base.Config) error {
-	var config Config
-	if len(cfg.PluginConfig) != 0 {
-		if err := base.MsgPackDecode(cfg.PluginConfig, &config); err != nil {
-			return err
-		}
-	}
-
-	d.config = &config
-	if cfg.AgentConfig != nil {
-		d.nomadConfig = cfg.AgentConfig.Driver
-	}
-
 	return nil
 }
 
