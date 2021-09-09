@@ -402,7 +402,7 @@ func MachineAddresses(name string, timeout time.Duration) (*MachineAddrs, error)
 
 }
 
-func isInstalled() error {
+func isSystemdInstalled() error {
 	_, err := exec.LookPath("systemd-nspawn")
 	if err != nil {
 		return err
