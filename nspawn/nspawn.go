@@ -75,16 +75,18 @@ type MachineConfig struct {
 	Port             hclutils.MapStrStr `codec:"port"`
 	Ports            []string           `codec:"ports"` // :-(
 	// Deprecated: Nomad dropped support for task network resources in 0.12
-	PortMap          hclutils.MapStrInt `codec:"port_map"`
-	ProcessTwo       bool               `codec:"process_two"`
-	Properties       hclutils.MapStrStr `codec:"properties"`
-	ReadOnly         bool               `codec:"read_only"`
-	ResolvConf       string             `codec:"resolv_conf"`
-	User             string             `codec:"user"`
-	UserNamespacing  bool               `codec:"user_namespacing"`
-	Volatile         string             `codec:"volatile"`
-	WorkingDirectory string             `codec:"working_directory"`
-	imagePath        string             `codec:"-"`
+	PortMap               hclutils.MapStrInt `codec:"port_map"`
+	PrivateUsers          string             `codec:"private_users"`
+	PrivateUsersOwnership string             `codec:"private_users_ownership"`
+	ProcessTwo            bool               `codec:"process_two"`
+	Properties            hclutils.MapStrStr `codec:"properties"`
+	ReadOnly              bool               `codec:"read_only"`
+	ResolvConf            string             `codec:"resolv_conf"`
+	User                  string             `codec:"user"`
+	UserNamespacing       bool               `codec:"user_namespacing"`
+	Volatile              string             `codec:"volatile"`
+	WorkingDirectory      string             `codec:"working_directory"`
+	imagePath             string             `codec:"-"`
 }
 
 type ImageType string
@@ -143,7 +145,14 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 		args = append(args, "--read-only")
 	}
 	if c.UserNamespacing {
-		args = append(args, "-U")
+		if c.PrivateUsers == "" {
+			c.PrivateUsers = "pick"
+		}
+		if c.PrivateUsersOwnership == "" {
+			c.PrivateUsers = "auto"
+		}
+		args = append(args, fmt.Sprintf("--private-users=%s", c.PrivateUsers))
+		args = append(args, fmt.Sprintf("--private-users-ownership=%s", c.PrivateUsersOwnership))
 	}
 	if c.Console != "" {
 		args = append(args, fmt.Sprintf("--console=%s", c.Console))
@@ -217,14 +226,44 @@ func (c *MachineConfig) Validate() error {
 			return fmt.Errorf("invalid parameter for resolv_conf")
 		}
 	}
+	if c.PrivateUsers != "" {
+		switch c.PrivateUsers {
+		case "yes", "no", "pick", "identity":
+		default:
+			// Check for single UID
+			_, err := strconv.Atoi(c.PrivateUsers)
+			if err != nil {
+				// Check for colon separated UIDs
+				uIDs := strings.Split(c.PrivateUsers, ":")
+				if len(uIDs) != 2 {
+					return fmt.Errorf("invalid parameter for private_users")
+				}
+				_, err = strconv.Atoi(uIDs[0])
+				if err != nil {
+					return fmt.Errorf("invalid parameter for private_users")
+				}
+				_, err = strconv.Atoi(uIDs[1])
+				if err != nil {
+					return fmt.Errorf("invalid parameter for private_users")
+				}
+			}
+		}
+	}
+	if c.PrivateUsersOwnership != "" {
+		switch c.PrivateUsersOwnership {
+		case "auto", "map", "chown":
+		default:
+			return fmt.Errorf("invalid parameter for private_users_ownership")
+		}
+	}
 	if c.Boot && c.ProcessTwo {
 		return fmt.Errorf("boot and process_two may not be combined")
 	}
-	if c.Volatile != "" && c.UserNamespacing {
-		return fmt.Errorf("volatile and user_namespacing may not be combined")
+	if c.Volatile != "" && c.PrivateUsersOwnership == "chown" {
+		return fmt.Errorf("volatile and private_users_ownership=chown may not be combined")
 	}
-	if c.ReadOnly && c.UserNamespacing {
-		return fmt.Errorf("read_only and user_namespacing may not be combined")
+	if c.ReadOnly && c.PrivateUsersOwnership == "chown" {
+		return fmt.Errorf("read_only and private_users_ownership=chown may not be combined")
 	}
 	if c.WorkingDirectory != "" && !filepath.IsAbs(c.WorkingDirectory) {
 		return fmt.Errorf("working_directory is not an absolute path")
