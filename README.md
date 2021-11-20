@@ -74,6 +74,13 @@ should cover a broad range of use cases:
 * [`user_namespacing`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#-U) -
   (Optional) `true` (default) or `false`. Enable user namespacing features
   inside the container.
+* [`private_users`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--private-users=) -
+  (Optional). Controls how user namespacing is enabled. For this option to take
+  effect, `user_namespacing` needs to be set to `true`.
+* [`private_users_ownership`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--private-users-ownership=) -
+  (Optional). Controls how to adjust the container image's UIDs and GIDs to
+  match the UID/GID range chosen with `private_users`. For this option to take
+  effect, `user_namespacing` needs to be set to `true`.
 * `command` - (Optional) A list of strings to pass as the used command to the
   container.
 

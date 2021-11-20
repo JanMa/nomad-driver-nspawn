@@ -80,9 +80,11 @@ var (
 			hclspec.NewAttr("user_namespacing", "bool", false),
 			hclspec.NewLiteral("true"),
 		),
-		"command": hclspec.NewAttr("command", "list(string)", false),
-		"console": hclspec.NewAttr("console", "string", false),
-		"image":   hclspec.NewAttr("image", "string", true),
+		"private_users":           hclspec.NewAttr("private_users", "string", false),
+		"private_users_ownership": hclspec.NewAttr("private_users_ownership", "string", false),
+		"command":                 hclspec.NewAttr("command", "list(string)", false),
+		"console":                 hclspec.NewAttr("console", "string", false),
+		"image":                   hclspec.NewAttr("image", "string", true),
 		"image_download": hclspec.NewBlock("image_download", false,
 			hclspec.NewObject(map[string]*hclspec.Spec{
 				"url": hclspec.NewAttr("url", "string", true),
@@ -234,7 +236,7 @@ func (d *Driver) Capabilities() (*drivers.Capabilities, error) {
 // It allows the driver to indicate its health to the client.
 // The channel returned should immediately send an initial Fingerprint,
 // then send periodic updates at an interval that is appropriate for the driver
-// until the context is canceled.	
+// until the context is canceled.
 func (d *Driver) Fingerprint(ctx context.Context) (<-chan *drivers.Fingerprint, error) {
 	ch := make(chan *drivers.Fingerprint)
 	go d.handleFingerprint(ctx, ch)
