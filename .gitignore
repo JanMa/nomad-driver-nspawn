@@ -25,3 +25,4 @@ nomad-driver-nspawn
 # Go version detection
 .go114
 .go115
+.go117
