@@ -329,6 +329,9 @@ message CreateNetworkRequest {
 
     // AllocID of the allocation the network is associated with
     string alloc_id = 1;
+
+    // Hostname of the network namespace
+    string hostname = 2;
 }
 
 message CreateNetworkResponse {
@@ -400,6 +403,13 @@ message NetworkIsolationSpec {
   string path = 2;
 
   map<string,string> labels = 3;
+
+  HostsConfig hostsConfig = 4;
+}
+
+message HostsConfig {
+  string hostname = 1;
+  string address  = 2;
 }
 
 message DNSConfig {

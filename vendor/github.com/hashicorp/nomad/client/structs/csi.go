@@ -20,6 +20,17 @@ type CSIVolumeMountOptions struct {
 	MountFlags []string
 }
 
+func (c *CSIVolumeMountOptions) ToCSIMountOptions() *structs.CSIMountOptions {
+	if c == nil {
+		return nil
+	}
+
+	return &structs.CSIMountOptions{
+		FSType:     c.Filesystem,
+		MountFlags: c.MountFlags,
+	}
+}
+
 // CSIControllerRequest interface lets us set embedded CSIControllerQuery
 // fields in the server
 type CSIControllerRequest interface {
@@ -43,9 +54,14 @@ func (c *CSIControllerQuery) SetControllerNodeID(nodeID string) {
 type ClientCSIControllerValidateVolumeRequest struct {
 	VolumeID string // note: this is the external ID
 
+	VolumeCapabilities []*structs.CSIVolumeCapability
+	MountOptions       *structs.CSIMountOptions
+	Secrets            structs.CSISecrets
+
+	// COMPAT(1.1.1): the AttachmentMode and AccessMode fields are deprecated
+	// and replaced by the VolumeCapabilities field above
 	AttachmentMode structs.CSIVolumeAttachmentMode
 	AccessMode     structs.CSIVolumeAccessMode
-	Secrets        structs.CSISecrets
 
 	// Parameters as returned by storage provider in CreateVolumeResponse.
 	// This field is optional.
@@ -63,18 +79,23 @@ func (c *ClientCSIControllerValidateVolumeRequest) ToCSIRequest() (*csi.Controll
 		return &csi.ControllerValidateVolumeRequest{}, nil
 	}
 
-	caps, err := csi.VolumeCapabilityFromStructs(c.AttachmentMode, c.AccessMode)
-	if err != nil {
-		return nil, err
-	}
-
-	return &csi.ControllerValidateVolumeRequest{
+	creq := &csi.ControllerValidateVolumeRequest{
 		ExternalID:   c.VolumeID,
 		Secrets:      c.Secrets,
-		Capabilities: caps,
+		Capabilities: []*csi.VolumeCapability{},
 		Parameters:   c.Parameters,
 		Context:      c.Context,
-	}, nil
+	}
+
+	for _, cap := range c.VolumeCapabilities {
+		ccap, err := csi.VolumeCapabilityFromStructs(
+			cap.AttachmentMode, cap.AccessMode, c.MountOptions)
+		if err != nil {
+			return nil, err
+		}
+		creq.Capabilities = append(creq.Capabilities, ccap)
+	}
+	return creq, nil
 }
 
 type ClientCSIControllerValidateVolumeResponse struct {
@@ -120,7 +141,8 @@ func (c *ClientCSIControllerAttachVolumeRequest) ToCSIRequest() (*csi.Controller
 		return &csi.ControllerPublishVolumeRequest{}, nil
 	}
 
-	caps, err := csi.VolumeCapabilityFromStructs(c.AttachmentMode, c.AccessMode)
+	var opts = c.MountOptions.ToCSIMountOptions()
+	caps, err := csi.VolumeCapabilityFromStructs(c.AttachmentMode, c.AccessMode, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +213,7 @@ type ClientCSIControllerDetachVolumeResponse struct{}
 type ClientCSIControllerCreateVolumeRequest struct {
 	Name               string
 	VolumeCapabilities []*structs.CSIVolumeCapability
+	MountOptions       *structs.CSIMountOptions
 	Parameters         map[string]string
 	Secrets            structs.CSISecrets
 	CapacityMin        int64
@@ -206,11 +229,7 @@ type ClientCSIControllerCreateVolumeRequest struct {
 func (req *ClientCSIControllerCreateVolumeRequest) ToCSIRequest() (*csi.ControllerCreateVolumeRequest, error) {
 
 	creq := &csi.ControllerCreateVolumeRequest{
-		Name: req.Name,
-		CapacityRange: &csi.CapacityRange{
-			RequiredBytes: req.CapacityMin,
-			LimitBytes:    req.CapacityMax,
-		},
+		Name:               req.Name,
 		VolumeCapabilities: []*csi.VolumeCapability{},
 		Parameters:         req.Parameters,
 		Secrets:            req.Secrets,
@@ -221,8 +240,19 @@ func (req *ClientCSIControllerCreateVolumeRequest) ToCSIRequest() (*csi.Controll
 		// TODO: topology is not yet supported
 		AccessibilityRequirements: &csi.TopologyRequirement{},
 	}
+
+	// The CSI spec requires that at least one of the fields in CapacityRange
+	// must be defined. Fields set to 0 are considered unspecified and the
+	// CreateVolumeRequest should not send an invalid value.
+	if req.CapacityMin != 0 || req.CapacityMax != 0 {
+		creq.CapacityRange = &csi.CapacityRange{
+			RequiredBytes: req.CapacityMin,
+			LimitBytes:    req.CapacityMax,
+		}
+	}
+
 	for _, cap := range req.VolumeCapabilities {
-		ccap, err := csi.VolumeCapabilityFromStructs(cap.AttachmentMode, cap.AccessMode)
+		ccap, err := csi.VolumeCapabilityFromStructs(cap.AttachmentMode, cap.AccessMode, req.MountOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -339,6 +369,7 @@ type ClientCSIControllerListSnapshotsRequest struct {
 	// not Nomad's own fields, for clarity when mapping between the two RPCs
 	MaxEntries    int32
 	StartingToken string
+	Secrets       structs.CSISecrets
 
 	CSIControllerQuery
 }
@@ -347,6 +378,7 @@ func (req *ClientCSIControllerListSnapshotsRequest) ToCSIRequest() *csi.Controll
 	return &csi.ControllerListSnapshotsRequest{
 		MaxEntries:    req.MaxEntries,
 		StartingToken: req.StartingToken,
+		Secrets:       req.Secrets,
 	}
 }
 

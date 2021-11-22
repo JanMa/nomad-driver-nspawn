@@ -10,6 +10,14 @@ import (
 	"github.com/mitchellh/hashstructure"
 )
 
+// DiffableWithID defines an object that has a unique and stable value that can
+// be used as an identifier when generating a diff.
+type DiffableWithID interface {
+	// DiffID returns the value to use to match entities between the old and
+	// the new input.
+	DiffID() string
+}
+
 // DiffType denotes the type of a diff object.
 type DiffType string
 
@@ -643,34 +651,130 @@ func serviceDiff(old, new *Service, contextual bool) *ObjectDiff {
 // serviceDiffs diffs a set of services. If contextual diff is enabled, unchanged
 // fields within objects nested in the tasks will be returned.
 func serviceDiffs(old, new []*Service, contextual bool) []*ObjectDiff {
-	oldMap := make(map[string]*Service, len(old))
-	newMap := make(map[string]*Service, len(new))
-	for _, o := range old {
-		oldMap[o.Name] = o
-	}
-	for _, n := range new {
-		newMap[n.Name] = n
+	// Handle trivial case.
+	if len(old) == 1 && len(new) == 1 {
+		if diff := serviceDiff(old[0], new[0], contextual); diff != nil {
+			return []*ObjectDiff{diff}
+		}
+		return nil
 	}
 
+	// For each service we will try to find a corresponding match in the other
+	// service list.
+	// The following lists store the index of the matching service for each
+	// position of the inputs.
+	oldMatches := make([]int, len(old))
+	newMatches := make([]int, len(new))
+
+	// Initialize all services as unmatched.
+	for i := range oldMatches {
+		oldMatches[i] = -1
+	}
+	for i := range newMatches {
+		newMatches[i] = -1
+	}
+
+	// Find a match in the new services list for each old service and compute
+	// their diffs.
 	var diffs []*ObjectDiff
-	for name, oldService := range oldMap {
-		// Diff the same, deleted and edited
-		if diff := serviceDiff(oldService, newMap[name], contextual); diff != nil {
+	for oldIndex, oldService := range old {
+		newIndex := findServiceMatch(oldService, oldIndex, new, newMatches)
+
+		// Old services that don't have a match were deleted.
+		if newIndex < 0 {
+			diff := serviceDiff(oldService, nil, contextual)
+			diffs = append(diffs, diff)
+			continue
+		}
+
+		// If A matches B then B matches A.
+		oldMatches[oldIndex] = newIndex
+		newMatches[newIndex] = oldIndex
+
+		newService := new[newIndex]
+		if diff := serviceDiff(oldService, newService, contextual); diff != nil {
 			diffs = append(diffs, diff)
 		}
 	}
 
-	for name, newService := range newMap {
-		// Diff the added
-		if old, ok := oldMap[name]; !ok {
-			if diff := serviceDiff(old, newService, contextual); diff != nil {
-				diffs = append(diffs, diff)
-			}
+	// New services without match were added.
+	for i, m := range newMatches {
+		if m == -1 {
+			diff := serviceDiff(nil, new[i], contextual)
+			diffs = append(diffs, diff)
 		}
 	}
 
 	sort.Sort(ObjectDiffs(diffs))
 	return diffs
+}
+
+// findServiceMatch returns the index of the service in the input services list
+// that matches the provided input service.
+func findServiceMatch(service *Service, serviceIndex int, services []*Service, matches []int) int {
+	// minScoreThreshold can be adjusted to generate more (lower value) or
+	// fewer (higher value) matches.
+	// More matches result in more Edited diffs, while fewer matches generate
+	// more Add/Delete diff pairs.
+	minScoreThreshold := 2
+
+	highestScore := 0
+	indexMatch := -1
+
+	for i, s := range services {
+		// Skip service if it's already matched.
+		if matches[i] >= 0 {
+			continue
+		}
+
+		// Finding a perfect match by just looking at the before and after
+		// list of services is impossible since they don't have a stable
+		// identifier that can be used to uniquely identify them.
+		//
+		// Users also have an implicit temporal intuition of which services
+		// match each other when editing their jobspec file. If they move the
+		// 3rd service to the top, they don't expect their job to change.
+		//
+		// This intuition could be made explicit by requiring a user-defined
+		// unique identifier, but this would cause additional work and the
+		// new field would not be intuitive for users to understand how to use
+		// it.
+		//
+		// Using a hash value of the service content will cause any changes to
+		// create a delete/add diff pair.
+		//
+		// There are three main candidates for a service ID:
+		//   - name, but they are not unique and can be modified.
+		//   - label port, but they have the same problems as name.
+		//   - service position within the overall list of services, but if the
+		//     service block is moved, it will impact all services that come
+		//     after it.
+		//
+		// None of these values are enough on their own, but they are also too
+		// strong when considered all together.
+		//
+		// So we try to score services by their main candidates with a preference
+		// towards name + label over service position.
+		score := 0
+		if i == serviceIndex {
+			score += 1
+		}
+
+		if service.PortLabel == s.PortLabel {
+			score += 2
+		}
+
+		if service.Name == s.Name {
+			score += 3
+		}
+
+		if score > minScoreThreshold && score > highestScore {
+			highestScore = score
+			indexMatch = i
+		}
+	}
+
+	return indexMatch
 }
 
 // serviceCheckDiff returns the diff of two service check objects. If contextual
@@ -848,6 +952,32 @@ func connectGatewayDiff(prev, next *ConsulGateway, contextual bool) *ObjectDiff 
 	if gatewayTerminatingDiff != nil {
 		diff.Objects = append(diff.Objects, gatewayTerminatingDiff)
 	}
+
+	// Diff the mesh gateway fields.
+	gatewayMeshDiff := connectGatewayMeshDiff(prev.Mesh, next.Mesh, contextual)
+	if gatewayMeshDiff != nil {
+		diff.Objects = append(diff.Objects, gatewayMeshDiff)
+	}
+
+	return diff
+}
+
+func connectGatewayMeshDiff(prev, next *ConsulMeshConfigEntry, contextual bool) *ObjectDiff {
+	diff := &ObjectDiff{Type: DiffTypeNone, Name: "Mesh"}
+
+	if reflect.DeepEqual(prev, next) {
+		return nil
+	} else if prev == nil {
+		// no fields to further diff
+		diff.Type = DiffTypeAdded
+	} else if next == nil {
+		// no fields to further diff
+		diff.Type = DiffTypeDeleted
+	} else {
+		diff.Type = DiffTypeEdited
+	}
+
+	// Currently no fields in mesh gateways.
 
 	return diff
 }
@@ -1326,20 +1456,85 @@ func consulProxyDiff(old, new *ConsulProxy, contextual bool) *ObjectDiff {
 		newPrimitiveFlat = flatmap.Flatten(new, nil, true)
 	}
 
-	// Diff the primitive fields.
+	// diff the primitive fields
 	diff.Fields = fieldDiffs(oldPrimitiveFlat, newPrimitiveFlat, contextual)
 
-	consulUpstreamsDiff := primitiveObjectSetDiff(
-		interfaceSlice(old.Upstreams),
-		interfaceSlice(new.Upstreams),
-		nil, "ConsulUpstreams", contextual)
-	if consulUpstreamsDiff != nil {
-		diff.Objects = append(diff.Objects, consulUpstreamsDiff...)
+	// diff the consul upstream slices
+	if upDiffs := consulProxyUpstreamsDiff(old.Upstreams, new.Upstreams, contextual); upDiffs != nil {
+		diff.Objects = append(diff.Objects, upDiffs...)
 	}
 
-	// Config diff
+	// diff the config blob
 	if cDiff := configDiff(old.Config, new.Config, contextual); cDiff != nil {
 		diff.Objects = append(diff.Objects, cDiff)
+	}
+
+	return diff
+}
+
+// consulProxyUpstreamsDiff diffs a set of connect upstreams. If contextual diff is
+// enabled, unchanged fields within objects nested in the tasks will be returned.
+func consulProxyUpstreamsDiff(old, new []ConsulUpstream, contextual bool) []*ObjectDiff {
+	oldMap := make(map[string]ConsulUpstream, len(old))
+	newMap := make(map[string]ConsulUpstream, len(new))
+
+	idx := func(up ConsulUpstream) string {
+		return fmt.Sprintf("%s/%s", up.Datacenter, up.DestinationName)
+	}
+
+	for _, o := range old {
+		oldMap[idx(o)] = o
+	}
+	for _, n := range new {
+		newMap[idx(n)] = n
+	}
+
+	var diffs []*ObjectDiff
+	for index, oldUpstream := range oldMap {
+		// Diff the same, deleted, and edited
+		if diff := consulProxyUpstreamDiff(oldUpstream, newMap[index], contextual); diff != nil {
+			diffs = append(diffs, diff)
+		}
+	}
+
+	for index, newUpstream := range newMap {
+		// diff the added
+		if oldUpstream, exists := oldMap[index]; !exists {
+			if diff := consulProxyUpstreamDiff(oldUpstream, newUpstream, contextual); diff != nil {
+				diffs = append(diffs, diff)
+			}
+		}
+	}
+	sort.Sort(ObjectDiffs(diffs))
+	return diffs
+}
+
+func consulProxyUpstreamDiff(prev, next ConsulUpstream, contextual bool) *ObjectDiff {
+	diff := &ObjectDiff{Type: DiffTypeNone, Name: "ConsulUpstreams"}
+	var oldPrimFlat, newPrimFlat map[string]string
+
+	if reflect.DeepEqual(prev, next) {
+		return nil
+	} else if prev.Equals(new(ConsulUpstream)) {
+		prev = ConsulUpstream{}
+		diff.Type = DiffTypeAdded
+		newPrimFlat = flatmap.Flatten(next, nil, true)
+	} else if next.Equals(new(ConsulUpstream)) {
+		next = ConsulUpstream{}
+		diff.Type = DiffTypeDeleted
+		oldPrimFlat = flatmap.Flatten(prev, nil, true)
+	} else {
+		diff.Type = DiffTypeEdited
+		oldPrimFlat = flatmap.Flatten(prev, nil, true)
+		newPrimFlat = flatmap.Flatten(next, nil, true)
+	}
+
+	// diff the primitive fields
+	diff.Fields = fieldDiffs(oldPrimFlat, newPrimFlat, contextual)
+
+	// diff the mesh gateway primitive object
+	if mDiff := primitiveObjectDiff(prev.MeshGateway, next.MeshGateway, nil, "MeshGateway", contextual); mDiff != nil {
+		diff.Objects = append(diff.Objects, mDiff)
 	}
 
 	return diff
@@ -2232,11 +2427,20 @@ func primitiveObjectSetDiff(old, new []interface{}, filter []string, name string
 	makeSet := func(objects []interface{}) map[string]interface{} {
 		objMap := make(map[string]interface{}, len(objects))
 		for _, obj := range objects {
-			hash, err := hashstructure.Hash(obj, nil)
-			if err != nil {
-				panic(err)
+			var key string
+
+			if diffable, ok := obj.(DiffableWithID); ok {
+				key = diffable.DiffID()
 			}
-			objMap[fmt.Sprintf("%d", hash)] = obj
+
+			if key == "" {
+				hash, err := hashstructure.Hash(obj, nil)
+				if err != nil {
+					panic(err)
+				}
+				key = fmt.Sprintf("%d", hash)
+			}
+			objMap[key] = obj
 		}
 
 		return objMap
@@ -2246,10 +2450,11 @@ func primitiveObjectSetDiff(old, new []interface{}, filter []string, name string
 	newSet := makeSet(new)
 
 	var diffs []*ObjectDiff
-	for k, v := range oldSet {
-		// Deleted
-		if _, ok := newSet[k]; !ok {
-			diffs = append(diffs, primitiveObjectDiff(v, nil, filter, name, contextual))
+	for k, oldObj := range oldSet {
+		newObj := newSet[k]
+		diff := primitiveObjectDiff(oldObj, newObj, filter, name, contextual)
+		if diff != nil {
+			diffs = append(diffs, diff)
 		}
 	}
 	for k, v := range newSet {

@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package executor
@@ -696,8 +697,9 @@ func configureCgroups(cfg *lconfigs.Config, command *ExecCommand) error {
 		return fmt.Errorf("resources.Cpu.CpuShares must be equal to or greater than 2: %v", cpuShares)
 	}
 
-	// Set the relative CPU shares for this cgroup.
+	// Set the relative CPU shares for this cgroup, and convert for cgroupv2
 	cfg.Cgroups.Resources.CpuShares = uint64(cpuShares)
+	cfg.Cgroups.Resources.CpuWeight = cgroups.ConvertCPUSharesToCgroupV2Value(uint64(cpuShares))
 
 	if command.Resources.LinuxResources != nil && command.Resources.LinuxResources.CpusetCgroupPath != "" {
 		cfg.Hooks = lconfigs.Hooks{
@@ -763,6 +765,10 @@ func newLibcontainerConfig(command *ExecCommand) (*lconfigs.Config, error) {
 	}
 
 	configureCapabilities(cfg, command)
+
+	// children should not inherit Nomad agent oom_score_adj value
+	oomScoreAdj := 0
+	cfg.OomScoreAdj = &oomScoreAdj
 
 	if err := configureIsolation(cfg, command); err != nil {
 		return nil, err

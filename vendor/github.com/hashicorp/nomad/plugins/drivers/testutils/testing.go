@@ -83,10 +83,12 @@ func (h *DriverHarness) Kill() {
 func (h *DriverHarness) MkAllocDir(t *drivers.TaskConfig, enableLogs bool) func() {
 	dir, err := ioutil.TempDir("", "nomad_driver_harness-")
 	require.NoError(h.t, err)
-	t.AllocDir = dir
 
-	allocDir := allocdir.NewAllocDir(h.logger, dir)
+	allocDir := allocdir.NewAllocDir(h.logger, dir, t.AllocID)
 	require.NoError(h.t, allocDir.Build())
+
+	t.AllocDir = allocDir.AllocDir
+
 	taskDir := allocDir.NewTaskDir(t.Name)
 
 	caps, err := h.Capabilities()
@@ -199,12 +201,12 @@ type MockDriver struct {
 }
 
 type MockNetworkManager struct {
-	CreateNetworkF  func(string) (*drivers.NetworkIsolationSpec, bool, error)
+	CreateNetworkF  func(string, *drivers.NetworkCreateRequest) (*drivers.NetworkIsolationSpec, bool, error)
 	DestroyNetworkF func(string, *drivers.NetworkIsolationSpec) error
 }
 
-func (m *MockNetworkManager) CreateNetwork(id string) (*drivers.NetworkIsolationSpec, bool, error) {
-	return m.CreateNetworkF(id)
+func (m *MockNetworkManager) CreateNetwork(allocID string, req *drivers.NetworkCreateRequest) (*drivers.NetworkIsolationSpec, bool, error) {
+	return m.CreateNetworkF(allocID, req)
 }
 func (m *MockNetworkManager) DestroyNetwork(id string, spec *drivers.NetworkIsolationSpec) error {
 	return m.DestroyNetworkF(id, spec)

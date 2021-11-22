@@ -25,15 +25,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hashicorp/nomad/lib/cpuset"
-
 	"github.com/hashicorp/cronexpr"
 	"github.com/hashicorp/go-msgpack/codec"
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/go-version"
-	"github.com/mitchellh/copystructure"
-	"golang.org/x/crypto/blake2b"
-
 	"github.com/hashicorp/nomad/acl"
 	"github.com/hashicorp/nomad/command/agent/host"
 	"github.com/hashicorp/nomad/command/agent/pprof"
@@ -41,8 +36,12 @@ import (
 	"github.com/hashicorp/nomad/helper/args"
 	"github.com/hashicorp/nomad/helper/constraints/semver"
 	"github.com/hashicorp/nomad/helper/uuid"
+	"github.com/hashicorp/nomad/lib/cpuset"
 	"github.com/hashicorp/nomad/lib/kheap"
 	psstructs "github.com/hashicorp/nomad/plugins/shared/structs"
+	"github.com/miekg/dns"
+	"github.com/mitchellh/copystructure"
+	"golang.org/x/crypto/blake2b"
 )
 
 var (
@@ -319,7 +318,7 @@ func (q QueryOptions) RequestNamespace() string {
 	return q.Namespace
 }
 
-// QueryOption only applies to reads, so always true
+// IsRead only applies to reads, so always true.
 func (q QueryOptions) IsRead() bool {
 	return true
 }
@@ -385,6 +384,9 @@ type WriteRequest struct {
 	// AuthToken is secret portion of the ACL token used for the request
 	AuthToken string
 
+	// IdempotencyToken can be used to ensure the write is idempotent.
+	IdempotencyToken string
+
 	InternalRpcInfo
 }
 
@@ -412,7 +414,7 @@ func (w WriteRequest) RequestNamespace() string {
 	return w.Namespace
 }
 
-// WriteRequest only applies to writes, always false
+// IsRead only applies to writes, always false.
 func (w WriteRequest) IsRead() bool {
 	return false
 }
@@ -1906,6 +1908,9 @@ type Node struct {
 	// HostVolumes is a map of host volume names to their configuration
 	HostVolumes map[string]*ClientHostVolumeConfig
 
+	// HostNetworks is a map of host host_network names to their configuration
+	HostNetworks map[string]*ClientHostNetworkConfig
+
 	// LastDrain contains metadata about the most recent drain operation
 	LastDrain *DrainMetadata
 
@@ -1991,6 +1996,7 @@ func (n *Node) Copy() *Node {
 	nn.CSINodePlugins = copyNodeCSI(nn.CSINodePlugins)
 	nn.Drivers = copyNodeDrivers(n.Drivers)
 	nn.HostVolumes = copyNodeHostVolumes(n.HostVolumes)
+	nn.HostNetworks = copyNodeHostNetworks(n.HostNetworks)
 	return nn
 }
 
@@ -2052,6 +2058,21 @@ func copyNodeHostVolumes(volumes map[string]*ClientHostVolumeConfig) map[string]
 	return c
 }
 
+// copyNodeHostVolumes is a helper to copy a map of string to HostNetwork
+func copyNodeHostNetworks(networks map[string]*ClientHostNetworkConfig) map[string]*ClientHostNetworkConfig {
+	l := len(networks)
+	if l == 0 {
+		return nil
+	}
+
+	c := make(map[string]*ClientHostNetworkConfig, l)
+	for network, v := range networks {
+		c[network] = v.Copy()
+	}
+
+	return c
+}
+
 // TerminalStatus returns if the current status is terminal and
 // will no longer transition.
 func (n *Node) TerminalStatus() bool {
@@ -2063,11 +2084,12 @@ func (n *Node) TerminalStatus() bool {
 	}
 }
 
-// COMPAT(0.11): Remove in 0.11
 // ComparableReservedResources returns the reserved resouces on the node
 // handling upgrade paths. Reserved networks must be handled separately. After
 // 0.11 calls to this should be replaced with:
 // node.ReservedResources.Comparable()
+//
+// COMPAT(0.11): Remove in 0.11
 func (n *Node) ComparableReservedResources() *ComparableResources {
 	// See if we can no-op
 	if n.Reserved == nil && n.ReservedResources == nil {
@@ -2095,10 +2117,11 @@ func (n *Node) ComparableReservedResources() *ComparableResources {
 	}
 }
 
-// COMPAT(0.11): Remove in 0.11
 // ComparableResources returns the resouces on the node
 // handling upgrade paths. Networking must be handled separately. After 0.11
 // calls to this should be replaced with: node.NodeResources.Comparable()
+//
+// // COMPAT(0.11): Remove in 0.11
 func (n *Node) ComparableResources() *ComparableResources {
 	// Node already has 0.9+ behavior
 	if n.NodeResources != nil {
@@ -2283,6 +2306,8 @@ func (r *Resources) Merge(other *Resources) {
 	}
 }
 
+// Equals Resources.
+//
 // COMPAT(0.10): Remove in 0.10
 func (r *Resources) Equals(o *Resources) bool {
 	if r == o {
@@ -2301,12 +2326,14 @@ func (r *Resources) Equals(o *Resources) bool {
 		r.Devices.Equals(&o.Devices)
 }
 
-// COMPAT(0.10): Remove in 0.10
-// ResourceDevices are part of Resources
+// ResourceDevices are part of Resources.
+//
+// COMPAT(0.10): Remove in 0.10.
 type ResourceDevices []*RequestedDevice
 
+// Equals ResourceDevices as set keyed by Name.
+//
 // COMPAT(0.10): Remove in 0.10
-// Equals ResourceDevices as set keyed by Name
 func (d *ResourceDevices) Equals(o *ResourceDevices) bool {
 	if d == o {
 		return true
@@ -2330,6 +2357,8 @@ func (d *ResourceDevices) Equals(o *ResourceDevices) bool {
 	return true
 }
 
+// Canonicalize the Resources struct.
+//
 // COMPAT(0.10): Remove in 0.10
 func (r *Resources) Canonicalize() {
 	// Ensure that an empty and nil slices are treated the same to avoid scheduling
@@ -2419,6 +2448,8 @@ func (r *Resources) Add(delta *Resources) {
 	}
 }
 
+// GoString returns the string representation of the Resources struct.
+//
 // COMPAT(0.10): Remove in 0.10
 func (r *Resources) GoString() string {
 	return fmt.Sprintf("*%#v", *r)
@@ -2529,6 +2560,7 @@ type NetworkResource struct {
 	Device        string     // Name of the device
 	CIDR          string     // CIDR block of addresses
 	IP            string     // Host IP address
+	Hostname      string     `json:",omitempty"` // Hostname of the network namespace
 	MBits         int        // Throughput
 	DNS           *DNSConfig // DNS Configuration
 	ReservedPorts []Port     // Host Reserved ports
@@ -2537,7 +2569,7 @@ type NetworkResource struct {
 
 func (nr *NetworkResource) Hash() uint32 {
 	var data []byte
-	data = append(data, []byte(fmt.Sprintf("%s%s%s%s%d", nr.Mode, nr.Device, nr.CIDR, nr.IP, nr.MBits))...)
+	data = append(data, []byte(fmt.Sprintf("%s%s%s%s%s%d", nr.Mode, nr.Device, nr.CIDR, nr.IP, nr.Hostname, nr.MBits))...)
 
 	for i, port := range nr.ReservedPorts {
 		data = append(data, []byte(fmt.Sprintf("r%d%s%d%d", i, port.Label, port.Value, port.To))...)
@@ -2788,6 +2820,9 @@ type NodeResources struct {
 	Networks     Networks
 	NodeNetworks []*NodeNetworkResource
 	Devices      []*NodeDeviceResource
+
+	MinDynamicPort int
+	MaxDynamicPort int
 }
 
 func (n *NodeResources) Copy() *NodeResources {
@@ -3386,7 +3421,7 @@ type NodeReservedNetworkResources struct {
 	ReservedHostPorts string
 }
 
-// ParsePortHostPorts returns the reserved host ports.
+// ParseReservedHostPorts returns the reserved host ports.
 func (n *NodeReservedNetworkResources) ParseReservedHostPorts() ([]uint64, error) {
 	return ParsePortRanges(n.ReservedHostPorts)
 }
@@ -3892,18 +3927,19 @@ func (c *ComparableResources) Superset(other *ComparableResources) (bool, string
 	return true, ""
 }
 
-// allocated finds the matching net index using device name
+// NetIndex finds the matching net index using device name
 func (c *ComparableResources) NetIndex(n *NetworkResource) int {
 	return c.Flattened.Networks.NetIndex(n)
 }
 
 const (
-	// JobTypeNomad is reserved for internal system tasks and is
+	// JobTypeCore is reserved for internal system tasks and is
 	// always handled by the CoreScheduler.
-	JobTypeCore    = "_core"
-	JobTypeService = "service"
-	JobTypeBatch   = "batch"
-	JobTypeSystem  = "system"
+	JobTypeCore     = "_core"
+	JobTypeService  = "service"
+	JobTypeBatch    = "batch"
+	JobTypeSystem   = "system"
+	JobTypeSysBatch = "sysbatch"
 )
 
 const (
@@ -3923,7 +3959,7 @@ const (
 	// JobMaxPriority is the maximum allowed priority
 	JobMaxPriority = 100
 
-	// Ensure CoreJobPriority is higher than any user
+	// CoreJobPriority should be higher than any user
 	// specified job so that it gets priority. This is important
 	// for the system to remain healthy.
 	CoreJobPriority = JobMaxPriority * 2
@@ -4016,6 +4052,10 @@ type Job struct {
 	// parameterized job.
 	Dispatched bool
 
+	// DispatchIdempotencyToken is optionally used to ensure that a dispatched job does not have any
+	// non-terminal siblings which have the same token value.
+	DispatchIdempotencyToken string
+
 	// Payload is the payload supplied when the job was dispatched.
 	Payload []byte
 
@@ -4073,8 +4113,8 @@ type Job struct {
 }
 
 // NamespacedID returns the namespaced id useful for logging
-func (j *Job) NamespacedID() *NamespacedID {
-	return &NamespacedID{
+func (j *Job) NamespacedID() NamespacedID {
+	return NamespacedID{
 		ID:        j.ID,
 		Namespace: j.Namespace,
 	}
@@ -4165,7 +4205,7 @@ func (j *Job) Validate() error {
 		mErr.Errors = append(mErr.Errors, errors.New("Job must be in a namespace"))
 	}
 	switch j.Type {
-	case JobTypeCore, JobTypeService, JobTypeBatch, JobTypeSystem:
+	case JobTypeCore, JobTypeService, JobTypeBatch, JobTypeSystem, JobTypeSysBatch:
 	case "":
 		mErr.Errors = append(mErr.Errors, errors.New("Missing job type"))
 	default:
@@ -4257,11 +4297,12 @@ func (j *Job) Validate() error {
 		}
 	}
 
-	// Validate periodic is only used with batch jobs.
+	// Validate periodic is only used with batch or sysbatch jobs.
 	if j.IsPeriodic() && j.Periodic.Enabled {
-		if j.Type != JobTypeBatch {
-			mErr.Errors = append(mErr.Errors,
-				fmt.Errorf("Periodic can only be used with %q scheduler", JobTypeBatch))
+		if j.Type != JobTypeBatch && j.Type != JobTypeSysBatch {
+			mErr.Errors = append(mErr.Errors, fmt.Errorf(
+				"Periodic can only be used with %q or %q scheduler", JobTypeBatch, JobTypeSysBatch,
+			))
 		}
 
 		if err := j.Periodic.Validate(); err != nil {
@@ -4270,9 +4311,10 @@ func (j *Job) Validate() error {
 	}
 
 	if j.IsParameterized() {
-		if j.Type != JobTypeBatch {
-			mErr.Errors = append(mErr.Errors,
-				fmt.Errorf("Parameterized job can only be used with %q scheduler", JobTypeBatch))
+		if j.Type != JobTypeBatch && j.Type != JobTypeSysBatch {
+			mErr.Errors = append(mErr.Errors, fmt.Errorf(
+				"Parameterized job can only be used with %q or %q scheduler", JobTypeBatch, JobTypeSysBatch,
+			))
 		}
 
 		if err := j.ParameterizedJob.Validate(); err != nil {
@@ -4295,19 +4337,24 @@ func (j *Job) Warnings() error {
 	var mErr multierror.Error
 
 	// Check the groups
-	ap := 0
+	hasAutoPromote, allAutoPromote := false, true
+
 	for _, tg := range j.TaskGroups {
 		if err := tg.Warnings(j); err != nil {
 			outer := fmt.Errorf("Group %q has warnings: %v", tg.Name, err)
 			mErr.Errors = append(mErr.Errors, outer)
 		}
-		if tg.Update != nil && tg.Update.AutoPromote {
-			ap += 1
+
+		if u := tg.Update; u != nil {
+			hasAutoPromote = hasAutoPromote || u.AutoPromote
+
+			// Having no canaries implies auto-promotion since there are no canaries to promote.
+			allAutoPromote = allAutoPromote && (u.Canary == 0 || u.AutoPromote)
 		}
 	}
 
 	// Check AutoPromote, should be all or none
-	if ap > 0 && ap < len(j.TaskGroups) {
+	if hasAutoPromote && !allAutoPromote {
 		err := fmt.Errorf("auto_promote must be true for all groups to enable automatic promotion")
 		mErr.Errors = append(mErr.Errors, err)
 	}
@@ -4769,8 +4816,8 @@ func (u *UpdateStrategy) IsEmpty() bool {
 	return u.MaxParallel == 0
 }
 
+// Rolling returns if a rolling strategy should be used.
 // TODO(alexdadgar): Remove once no longer used by the scheduler.
-// Rolling returns if a rolling strategy should be used
 func (u *UpdateStrategy) Rolling() bool {
 	return u.Stagger > 0 && u.MaxParallel > 0
 }
@@ -5308,7 +5355,7 @@ type JobScalingEvents struct {
 	ModifyIndex uint64
 }
 
-// Factory method for ScalingEvent objects
+// NewScalingEvent method for ScalingEvent objects.
 func NewScalingEvent(message string) *ScalingEvent {
 	return &ScalingEvent{
 		Time:    time.Now().Unix(),
@@ -5504,7 +5551,7 @@ func (p *ScalingPolicy) Diff(p2 *ScalingPolicy) bool {
 	return !reflect.DeepEqual(*p, copy)
 }
 
-// TarketTaskGroup updates a ScalingPolicy target to specify a given task group
+// TargetTaskGroup updates a ScalingPolicy target to specify a given task group
 func (p *ScalingPolicy) TargetTaskGroup(job *Job, tg *TaskGroup) *ScalingPolicy {
 	p.Target = map[string]string{
 		ScalingTargetNamespace: job.Namespace,
@@ -6292,7 +6339,18 @@ func (tg *TaskGroup) validateNetworks() error {
 				mErr.Errors = append(mErr.Errors, err)
 			}
 		}
+
+		// Validate the hostname field to be a valid DNS name. If the parameter
+		// looks like it includes an interpolation value, we skip this. It
+		// would be nice to validate additional parameters, but this isn't the
+		// right place.
+		if net.Hostname != "" && !strings.Contains(net.Hostname, "${") {
+			if _, ok := dns.IsDomainName(net.Hostname); !ok {
+				mErr.Errors = append(mErr.Errors, errors.New("Hostname is not a valid DNS name"))
+			}
+		}
 	}
+
 	// Check for duplicate tasks or port labels, and no duplicated static ports
 	for _, task := range tg.Tasks {
 		if task.Resources == nil {
@@ -6331,13 +6389,11 @@ func (tg *TaskGroup) validateNetworks() error {
 	return mErr.ErrorOrNil()
 }
 
-// validateServices runs Service.Validate() on group-level services,
-// checks that group services do not conflict with task services and that
+// validateServices runs Service.Validate() on group-level services, checks
 // group service checks that refer to tasks only refer to tasks that exist.
 func (tg *TaskGroup) validateServices() error {
 	var mErr multierror.Error
 	knownTasks := make(map[string]struct{})
-	knownServices := make(map[string]struct{})
 
 	// Create a map of known tasks and their services so we can compare
 	// vs the group-level services and checks
@@ -6347,15 +6403,11 @@ func (tg *TaskGroup) validateServices() error {
 			continue
 		}
 		for _, service := range task.Services {
-			if _, ok := knownServices[service.Name+service.PortLabel]; ok {
-				mErr.Errors = append(mErr.Errors, fmt.Errorf("Service %s is duplicate", service.Name))
-			}
 			for _, check := range service.Checks {
 				if check.TaskName != "" {
 					mErr.Errors = append(mErr.Errors, fmt.Errorf("Check %s is invalid: only task group service checks can be assigned tasks", check.Name))
 				}
 			}
-			knownServices[service.Name+service.PortLabel] = struct{}{}
 		}
 	}
 	for i, service := range tg.Services {
@@ -6370,10 +6422,7 @@ func (tg *TaskGroup) validateServices() error {
 		if service.AddressMode == AddressModeDriver {
 			mErr.Errors = append(mErr.Errors, fmt.Errorf("service %q cannot use address_mode=\"driver\", only services defined in a \"task\" block can use this mode", service.Name))
 		}
-		if _, ok := knownServices[service.Name+service.PortLabel]; ok {
-			mErr.Errors = append(mErr.Errors, fmt.Errorf("Service %s is duplicate", service.Name))
-		}
-		knownServices[service.Name+service.PortLabel] = struct{}{}
+
 		for _, check := range service.Checks {
 			if check.TaskName != "" {
 				if check.Type != ServiceCheckScript && check.Type != ServiceCheckGRPC {
@@ -7209,19 +7258,30 @@ func (k TaskKind) IsConnectNative() bool {
 	return k.hasPrefix(ConnectNativePrefix)
 }
 
+// IsConnectIngress returns true if the TaskKind is connect-ingress.
 func (k TaskKind) IsConnectIngress() bool {
 	return k.hasPrefix(ConnectIngressPrefix)
 }
 
+// IsConnectTerminating returns true if the TaskKind is connect-terminating.
 func (k TaskKind) IsConnectTerminating() bool {
 	return k.hasPrefix(ConnectTerminatingPrefix)
 }
 
+// IsConnectMesh returns true if the TaskKind is connect-mesh.
+func (k TaskKind) IsConnectMesh() bool {
+	return k.hasPrefix(ConnectMeshPrefix)
+}
+
+// IsAnyConnectGateway returns true if the TaskKind represents any one of the
+// supported connect gateway types.
 func (k TaskKind) IsAnyConnectGateway() bool {
 	switch {
 	case k.IsConnectIngress():
 		return true
 	case k.IsConnectTerminating():
+		return true
+	case k.IsConnectMesh():
 		return true
 	default:
 		return false
@@ -7243,14 +7303,11 @@ const (
 
 	// ConnectTerminatingPrefix is the prefix used for fields referencing a Consul
 	// Connect Terminating Gateway Proxy.
-	//
 	ConnectTerminatingPrefix = "connect-terminating"
 
 	// ConnectMeshPrefix is the prefix used for fields referencing a Consul Connect
 	// Mesh Gateway Proxy.
-	//
-	// Not yet supported.
-	// ConnectMeshPrefix = "connect-mesh"
+	ConnectMeshPrefix = "connect-mesh"
 )
 
 // ValidateConnectProxyService checks that the service that is being
@@ -7439,6 +7496,11 @@ func (t *Template) Warnings() error {
 	}
 
 	return mErr.ErrorOrNil()
+}
+
+// DiffID fulfills the DiffableWithID interface.
+func (t *Template) DiffID() string {
+	return t.DestPath
 }
 
 // AllocState records a single event that changes the state of the whole allocation
@@ -8082,6 +8144,11 @@ func (ta *TaskArtifact) GoString() string {
 	return fmt.Sprintf("%+v", ta)
 }
 
+// DiffID fulfills the DiffableWithID interface.
+func (ta *TaskArtifact) DiffID() string {
+	return ta.RelativeDest
+}
+
 // hashStringMap appends a deterministic hash of m onto h.
 func hashStringMap(h hash.Hash, m map[string]string) {
 	keys := make([]string, 0, len(m))
@@ -8234,15 +8301,14 @@ const (
 	ConstraintAttributeIsNotSet = "is_not_set"
 )
 
-// Constraints are used to restrict placement options.
+// A Constraint is used to restrict placement options.
 type Constraint struct {
 	LTarget string // Left-hand target
 	RTarget string // Right-hand target
 	Operand string // Constraint operand (<=, <, =, !=, >, >=), contains, near
-	str     string // Memoized string
 }
 
-// Equal checks if two constraints are equal
+// Equals checks if two constraints are equal.
 func (c *Constraint) Equals(o *Constraint) bool {
 	return c == o ||
 		c.LTarget == o.LTarget &&
@@ -8250,6 +8316,7 @@ func (c *Constraint) Equals(o *Constraint) bool {
 			c.Operand == o.Operand
 }
 
+// Equal is like Equals but with one less s.
 func (c *Constraint) Equal(o *Constraint) bool {
 	return c.Equals(o)
 }
@@ -8258,17 +8325,15 @@ func (c *Constraint) Copy() *Constraint {
 	if c == nil {
 		return nil
 	}
-	nc := new(Constraint)
-	*nc = *c
-	return nc
+	return &Constraint{
+		LTarget: c.LTarget,
+		RTarget: c.RTarget,
+		Operand: c.Operand,
+	}
 }
 
 func (c *Constraint) String() string {
-	if c.str != "" {
-		return c.str
-	}
-	c.str = fmt.Sprintf("%s %s %s", c.LTarget, c.Operand, c.RTarget)
-	return c.str
+	return fmt.Sprintf("%s %s %s", c.LTarget, c.Operand, c.RTarget)
 }
 
 func (c *Constraint) Validate() error {
@@ -8362,10 +8427,9 @@ type Affinity struct {
 	RTarget string // Right-hand target
 	Operand string // Affinity operand (<=, <, =, !=, >, >=), set_contains_all, set_contains_any
 	Weight  int8   // Weight applied to nodes that match the affinity. Can be negative
-	str     string // Memoized string
 }
 
-// Equal checks if two affinities are equal
+// Equals checks if two affinities are equal.
 func (a *Affinity) Equals(o *Affinity) bool {
 	return a == o ||
 		a.LTarget == o.LTarget &&
@@ -8382,17 +8446,16 @@ func (a *Affinity) Copy() *Affinity {
 	if a == nil {
 		return nil
 	}
-	na := new(Affinity)
-	*na = *a
-	return na
+	return &Affinity{
+		LTarget: a.LTarget,
+		RTarget: a.RTarget,
+		Operand: a.Operand,
+		Weight:  a.Weight,
+	}
 }
 
 func (a *Affinity) String() string {
-	if a.str != "" {
-		return a.str
-	}
-	a.str = fmt.Sprintf("%s %s %s %v", a.LTarget, a.Operand, a.RTarget, a.Weight)
-	return a.str
+	return fmt.Sprintf("%s %s %s %v", a.LTarget, a.Operand, a.RTarget, a.Weight)
 }
 
 func (a *Affinity) Validate() error {
@@ -8875,7 +8938,7 @@ func (d *Deployment) HasAutoPromote() bool {
 		return false
 	}
 	for _, group := range d.TaskGroups {
-		if !group.AutoPromote {
+		if group.DesiredCanaries > 0 && !group.AutoPromote {
 			return false
 		}
 	}
@@ -9554,7 +9617,7 @@ func (a *Allocation) Terminated() bool {
 	return false
 }
 
-// SetStopped updates the allocation in place to a DesiredStatus stop, with the ClientStatus
+// SetStop updates the allocation in place to a DesiredStatus stop, with the ClientStatus
 func (a *Allocation) SetStop(clientStatus, clientDesc string) {
 	a.DesiredStatus = AllocDesiredStatusStop
 	a.ClientStatus = clientStatus
@@ -9621,17 +9684,18 @@ func (a *Allocation) ShouldMigrate() bool {
 	return true
 }
 
-// SetEventDisplayMessage populates the display message if its not already set,
+// SetEventDisplayMessages populates the display message if its not already set,
 // a temporary fix to handle old allocations that don't have it.
 // This method will be removed in a future release.
 func (a *Allocation) SetEventDisplayMessages() {
 	setDisplayMsg(a.TaskStates)
 }
 
-// COMPAT(0.11): Remove in 0.11
 // ComparableResources returns the resources on the allocation
 // handling upgrade paths. After 0.11 calls to this should be replaced with:
 // alloc.AllocatedResources.Comparable()
+//
+// COMPAT(0.11): Remove in 0.11
 func (a *Allocation) ComparableResources() *ComparableResources {
 	// ALloc already has 0.9+ behavior
 	if a.AllocatedResources != nil {
@@ -9766,9 +9830,9 @@ type AllocListStub struct {
 	ModifyTime            int64
 }
 
-// SetEventDisplayMessage populates the display message if its not already set,
-// a temporary fix to handle old allocations that don't have it.
-// This method will be removed in a future release.
+// SetEventDisplayMessages populates the display message if its not already
+// set, a temporary fix to handle old allocations that don't have it. This
+// method will be removed in a future release.
 func (a *AllocListStub) SetEventDisplayMessages() {
 	setDisplayMsg(a.TaskStates)
 }
@@ -10539,6 +10603,67 @@ type Plan struct {
 	// Plan. The leader will wait to evaluate the plan until its StateStore
 	// has reached at least this index.
 	SnapshotIndex uint64
+}
+
+func (p *Plan) GoString() string {
+	out := fmt.Sprintf("(eval %s", p.EvalID[:8])
+	out += fmt.Sprintf(", job %s", p.Job.ID)
+	if p.Deployment != nil {
+		out += fmt.Sprintf(", deploy %s", p.Deployment.ID[:8])
+	}
+	if len(p.NodeUpdate) > 0 {
+		out += ", NodeUpdates: "
+		for node, allocs := range p.NodeUpdate {
+			out += fmt.Sprintf("(node[%s]", node[:8])
+			for _, alloc := range allocs {
+				out += fmt.Sprintf(" (%s stop/evict)", alloc.ID[:8])
+			}
+			out += ")"
+		}
+	}
+	if len(p.NodeAllocation) > 0 {
+		out += ", NodeAllocations: "
+		for node, allocs := range p.NodeAllocation {
+			out += fmt.Sprintf("(node[%s]", node[:8])
+			for _, alloc := range allocs {
+				out += fmt.Sprintf(" (%s %s %s)",
+					alloc.ID[:8], alloc.Name, alloc.DesiredStatus,
+				)
+			}
+			out += ")"
+		}
+	}
+	if len(p.NodePreemptions) > 0 {
+		out += ", NodePreemptions: "
+		for node, allocs := range p.NodePreemptions {
+			out += fmt.Sprintf("(node[%s]", node[:8])
+			for _, alloc := range allocs {
+				out += fmt.Sprintf(" (%s %s %s)",
+					alloc.ID[:8], alloc.Name, alloc.DesiredStatus,
+				)
+			}
+			out += ")"
+		}
+	}
+	if len(p.DeploymentUpdates) > 0 {
+		out += ", DeploymentUpdates: "
+		for _, dupdate := range p.DeploymentUpdates {
+			out += fmt.Sprintf("(%s %s)",
+				dupdate.DeploymentID[:8], dupdate.Status)
+		}
+	}
+	if p.Annotations != nil {
+		out += ", Annotations: "
+		for tg, updates := range p.Annotations.DesiredTGUpdates {
+			out += fmt.Sprintf("(update[%s] %v)", tg, updates)
+		}
+		for _, preempted := range p.Annotations.PreemptedAllocs {
+			out += fmt.Sprintf("(preempt %s)", preempted.ID[:8])
+		}
+	}
+
+	out += ")"
+	return out
 }
 
 // AppendStoppedAlloc marks an allocation to be stopped. The clientStatus of the
