@@ -189,6 +189,46 @@ func HCL() string {
 `
 }
 
+func SystemBatchJob() *structs.Job {
+	job := &structs.Job{
+		Region:      "global",
+		ID:          fmt.Sprintf("mock-sysbatch-%s", uuid.Short()),
+		Name:        "my-sysbatch",
+		Namespace:   structs.DefaultNamespace,
+		Type:        structs.JobTypeSysBatch,
+		Priority:    10,
+		Datacenters: []string{"dc1"},
+		Constraints: []*structs.Constraint{
+			{
+				LTarget: "${attr.kernel.name}",
+				RTarget: "linux",
+				Operand: "=",
+			},
+		},
+		TaskGroups: []*structs.TaskGroup{{
+			Count: 1,
+			Name:  "pinger",
+			Tasks: []*structs.Task{{
+				Name:   "ping-example",
+				Driver: "exec",
+				Config: map[string]interface{}{
+					"command": "/usr/bin/ping",
+					"args":    []string{"-c", "5", "example.com"},
+				},
+				LogConfig: structs.DefaultLogConfig(),
+			}},
+		}},
+
+		Status:         structs.JobStatusPending,
+		Version:        0,
+		CreateIndex:    42,
+		ModifyIndex:    99,
+		JobModifyIndex: 99,
+	}
+	job.Canonicalize()
+	return job
+}
+
 func Job() *structs.Job {
 	job := &structs.Job{
 		Region:      "global",
@@ -899,6 +939,9 @@ func ConnectIngressGatewayJob(mode string, inject bool) *structs.Job {
 			},
 		},
 	}}
+
+	tg.Tasks = nil
+
 	// some tests need to assume the gateway proxy task has already been injected
 	if inject {
 		tg.Tasks = []*structs.Task{{
@@ -912,9 +955,102 @@ func ConnectIngressGatewayJob(mode string, inject bool) *structs.Job {
 				MaxFileSizeMB: 2,
 			},
 		}}
-	} else {
-		// otherwise there are no tasks in the group yet
-		tg.Tasks = nil
+	}
+	return job
+}
+
+// ConnectTerminatingGatewayJob creates a structs.Job that contains the definition
+// of a Consul Terminating Gateway service. The mode is the name of the network mode
+// assumed by the task group. If inject is true, a corresponding task is set on the
+// group's Tasks (i.e. what the job would look like after mutation).
+func ConnectTerminatingGatewayJob(mode string, inject bool) *structs.Job {
+	job := Job()
+	tg := job.TaskGroups[0]
+	tg.Networks = []*structs.NetworkResource{{
+		Mode: mode,
+	}}
+	tg.Services = []*structs.Service{{
+		Name:      "my-terminating-service",
+		PortLabel: "9999",
+		Connect: &structs.ConsulConnect{
+			Gateway: &structs.ConsulGateway{
+				Proxy: &structs.ConsulGatewayProxy{
+					ConnectTimeout:            helper.TimeToPtr(3 * time.Second),
+					EnvoyGatewayBindAddresses: make(map[string]*structs.ConsulGatewayBindAddress),
+				},
+				Terminating: &structs.ConsulTerminatingConfigEntry{
+					Services: []*structs.ConsulLinkedService{{
+						Name:     "service1",
+						CAFile:   "/ssl/ca_file",
+						CertFile: "/ssl/cert_file",
+						KeyFile:  "/ssl/key_file",
+						SNI:      "sni-name",
+					}},
+				},
+			},
+		},
+	}}
+
+	tg.Tasks = nil
+
+	// some tests need to assume the gateway proxy task has already been injected
+	if inject {
+		tg.Tasks = []*structs.Task{{
+			Name:          fmt.Sprintf("%s-%s", structs.ConnectTerminatingPrefix, "my-terminating-service"),
+			Kind:          structs.NewTaskKind(structs.ConnectTerminatingPrefix, "my-terminating-service"),
+			Driver:        "docker",
+			Config:        make(map[string]interface{}),
+			ShutdownDelay: 5 * time.Second,
+			LogConfig: &structs.LogConfig{
+				MaxFiles:      2,
+				MaxFileSizeMB: 2,
+			},
+		}}
+	}
+	return job
+}
+
+// ConnectMeshGatewayJob creates a structs.Job that contains the definition of a
+// Consul Mesh Gateway service. The mode is the name of the network mode assumed
+// by the task group. If inject is true, a corresponding task is set on the group's
+// Tasks (i.e. what the job would look like after job mutation).
+func ConnectMeshGatewayJob(mode string, inject bool) *structs.Job {
+	job := Job()
+	tg := job.TaskGroups[0]
+	tg.Networks = []*structs.NetworkResource{{
+		Mode: mode,
+	}}
+	tg.Services = []*structs.Service{{
+		Name:      "my-mesh-service",
+		PortLabel: "public_port",
+		Connect: &structs.ConsulConnect{
+			Gateway: &structs.ConsulGateway{
+				Proxy: &structs.ConsulGatewayProxy{
+					ConnectTimeout:            helper.TimeToPtr(3 * time.Second),
+					EnvoyGatewayBindAddresses: make(map[string]*structs.ConsulGatewayBindAddress),
+				},
+				Mesh: &structs.ConsulMeshConfigEntry{
+					// nothing to configure
+				},
+			},
+		},
+	}}
+
+	tg.Tasks = nil
+
+	// some tests need to assume the gateway task has already been injected
+	if inject {
+		tg.Tasks = []*structs.Task{{
+			Name:          fmt.Sprintf("%s-%s", structs.ConnectMeshPrefix, "my-mesh-service"),
+			Kind:          structs.NewTaskKind(structs.ConnectMeshPrefix, "my-mesh-service"),
+			Driver:        "docker",
+			Config:        make(map[string]interface{}),
+			ShutdownDelay: 5 * time.Second,
+			LogConfig: &structs.LogConfig{
+				MaxFiles:      2,
+				MaxFileSizeMB: 2,
+			},
+		}}
 	}
 	return job
 }
@@ -1113,7 +1249,7 @@ func BlockedEval() *structs.Evaluation {
 }
 
 func JobSummary(jobID string) *structs.JobSummary {
-	js := &structs.JobSummary{
+	return &structs.JobSummary{
 		JobID:     jobID,
 		Namespace: structs.DefaultNamespace,
 		Summary: map[string]structs.TaskGroupSummary{
@@ -1123,7 +1259,19 @@ func JobSummary(jobID string) *structs.JobSummary {
 			},
 		},
 	}
-	return js
+}
+
+func JobSysBatchSummary(jobID string) *structs.JobSummary {
+	return &structs.JobSummary{
+		JobID:     jobID,
+		Namespace: structs.DefaultNamespace,
+		Summary: map[string]structs.TaskGroupSummary{
+			"pinger": {
+				Queued:   0,
+				Starting: 0,
+			},
+		},
+	}
 }
 
 func Alloc() *structs.Allocation {
@@ -1201,7 +1349,7 @@ func Alloc() *structs.Allocation {
 	return alloc
 }
 
-// ConnectJob adds a Connect proxy sidecar group service to mock.Alloc.
+// ConnectAlloc adds a Connect proxy sidecar group service to mock.Alloc.
 func ConnectAlloc() *structs.Allocation {
 	alloc := Alloc()
 	alloc.Job = ConnectJob()
@@ -1406,6 +1554,34 @@ func BatchAlloc() *structs.Allocation {
 	}
 	alloc.JobID = alloc.Job.ID
 	return alloc
+}
+
+func SysBatchAlloc() *structs.Allocation {
+	job := SystemBatchJob()
+	return &structs.Allocation{
+		ID:        uuid.Generate(),
+		EvalID:    uuid.Generate(),
+		NodeID:    "12345678-abcd-efab-cdef-123456789abc",
+		Namespace: structs.DefaultNamespace,
+		TaskGroup: "pinger",
+		AllocatedResources: &structs.AllocatedResources{
+			Tasks: map[string]*structs.AllocatedTaskResources{
+				"ping-example": {
+					Cpu:    structs.AllocatedCpuResources{CpuShares: 500},
+					Memory: structs.AllocatedMemoryResources{MemoryMB: 256},
+					Networks: []*structs.NetworkResource{{
+						Device: "eth0",
+						IP:     "192.168.0.100",
+					}},
+				},
+			},
+			Shared: structs.AllocatedSharedResources{DiskMB: 150},
+		},
+		Job:           job,
+		JobID:         job.ID,
+		DesiredStatus: structs.AllocDesiredStatusRun,
+		ClientStatus:  structs.AllocClientStatusPending,
+	}
 }
 
 func SystemAlloc() *structs.Allocation {

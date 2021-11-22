@@ -68,7 +68,7 @@ func HashUUID(input string) (output string, hashed bool) {
 	return output, true
 }
 
-// boolToPtr returns the pointer to a boolean
+// BoolToPtr returns the pointer to a boolean.
 func BoolToPtr(b bool) *bool {
 	return &b
 }
@@ -197,6 +197,26 @@ func SliceStringContains(list []string, item string) bool {
 	return false
 }
 
+// SliceStringHasPrefix returns true if any string in list starts with prefix
+func SliceStringHasPrefix(list []string, prefix string) bool {
+	for _, s := range list {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// StringHasPrefixInSlice returns true if string starts with any prefix in list
+func StringHasPrefixInSlice(s string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func SliceSetDisjoint(first, second []string) (bool, []string) {
 	contained := make(map[string]struct{}, len(first))
 	for _, k := range first {
@@ -278,7 +298,8 @@ func CompareMapStringString(a, b map[string]string) bool {
 	return true
 }
 
-// Helpers for copying generic structures.
+// Below is helpers for copying generic structures.
+
 func CopyMapStringString(m map[string]string) map[string]string {
 	l := len(m)
 	if l == 0 {

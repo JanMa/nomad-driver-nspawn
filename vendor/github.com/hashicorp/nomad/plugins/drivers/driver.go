@@ -90,7 +90,7 @@ type ExecOptions struct {
 // network namespace for which tasks can join. This only needs to be implemented
 // if the driver MUST create the network namespace
 type DriverNetworkManager interface {
-	CreateNetwork(allocID string) (*NetworkIsolationSpec, bool, error)
+	CreateNetwork(allocID string, request *NetworkCreateRequest) (*NetworkIsolationSpec, bool, error)
 	DestroyNetwork(allocID string, spec *NetworkIsolationSpec) error
 }
 
@@ -200,9 +200,24 @@ var (
 )
 
 type NetworkIsolationSpec struct {
-	Mode   NetIsolationMode
-	Path   string
-	Labels map[string]string
+	Mode        NetIsolationMode
+	Path        string
+	Labels      map[string]string
+	HostsConfig *HostsConfig
+}
+
+type HostsConfig struct {
+	Hostname string
+	Address  string
+}
+
+// NetworkCreateRequest contains all the relevant information when creating a
+// network via DriverNetworkManager.CreateNetwork.
+type NetworkCreateRequest struct {
+
+	// Hostname is the hostname the user has specified that the network should
+	// be configured with.
+	Hostname string
 }
 
 // MountConfigSupport is an enum that defaults to "all" for backwards

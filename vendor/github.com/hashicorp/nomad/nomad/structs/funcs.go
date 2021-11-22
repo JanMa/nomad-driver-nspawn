@@ -44,31 +44,31 @@ func warningsFormatter(es []error) string {
 
 // RemoveAllocs is used to remove any allocs with the given IDs
 // from the list of allocations
-func RemoveAllocs(alloc []*Allocation, remove []*Allocation) []*Allocation {
+func RemoveAllocs(allocs []*Allocation, remove []*Allocation) []*Allocation {
+	if len(remove) == 0 {
+		return allocs
+	}
 	// Convert remove into a set
 	removeSet := make(map[string]struct{})
 	for _, remove := range remove {
 		removeSet[remove.ID] = struct{}{}
 	}
 
-	n := len(alloc)
-	for i := 0; i < n; i++ {
-		if _, ok := removeSet[alloc[i].ID]; ok {
-			alloc[i], alloc[n-1] = alloc[n-1], nil
-			i--
-			n--
+	r := make([]*Allocation, 0, len(allocs))
+	for _, alloc := range allocs {
+		if _, ok := removeSet[alloc.ID]; !ok {
+			r = append(r, alloc)
 		}
 	}
-
-	alloc = alloc[:n]
-	return alloc
+	return r
 }
 
 // FilterTerminalAllocs filters out all allocations in a terminal state and
-// returns the latest terminal allocations
+// returns the latest terminal allocations.
 func FilterTerminalAllocs(allocs []*Allocation) ([]*Allocation, map[string]*Allocation) {
 	terminalAllocsByName := make(map[string]*Allocation)
 	n := len(allocs)
+
 	for i := 0; i < n; i++ {
 		if allocs[i].TerminalStatus() {
 
@@ -86,7 +86,57 @@ func FilterTerminalAllocs(allocs []*Allocation) ([]*Allocation, map[string]*Allo
 			n--
 		}
 	}
+
 	return allocs[:n], terminalAllocsByName
+}
+
+// SplitTerminalAllocs splits allocs into non-terminal and terminal allocs, with
+// the terminal allocs indexed by node->alloc.name.
+func SplitTerminalAllocs(allocs []*Allocation) ([]*Allocation, TerminalByNodeByName) {
+	var alive []*Allocation
+	var terminal = make(TerminalByNodeByName)
+
+	for _, alloc := range allocs {
+		if alloc.TerminalStatus() {
+			terminal.Set(alloc)
+		} else {
+			alive = append(alive, alloc)
+		}
+	}
+
+	return alive, terminal
+}
+
+// TerminalByNodeByName is a map of NodeID->Allocation.Name->Allocation used by
+// the sysbatch scheduler for locating the most up-to-date terminal allocations.
+type TerminalByNodeByName map[string]map[string]*Allocation
+
+func (a TerminalByNodeByName) Set(allocation *Allocation) {
+	node := allocation.NodeID
+	name := allocation.Name
+
+	if _, exists := a[node]; !exists {
+		a[node] = make(map[string]*Allocation)
+	}
+
+	if previous, exists := a[node][name]; !exists {
+		a[node][name] = allocation
+	} else if previous.CreateIndex < allocation.CreateIndex {
+		// keep the newest version of the terminal alloc for the coordinate
+		a[node][name] = allocation
+	}
+}
+
+func (a TerminalByNodeByName) Get(nodeID, name string) (*Allocation, bool) {
+	if _, exists := a[nodeID]; !exists {
+		return nil, false
+	}
+
+	if _, exists := a[nodeID][name]; !exists {
+		return nil, false
+	}
+
+	return a[nodeID][name], true
 }
 
 // AllocsFit checks if a given set of allocations will fit on a node.
@@ -205,7 +255,7 @@ func ScoreFitBinPack(node *Node, util *ComparableResources) float64 {
 	return score
 }
 
-// ScoreFitBinSpread computes a fit score to achieve spread behavior.
+// ScoreFitSpread computes a fit score to achieve spread behavior.
 // Score is in [0, 18]
 //
 // This is equivalent to Worst Fit of
@@ -308,7 +358,7 @@ func VaultPoliciesSet(policies map[string]map[string]*Vault) []string {
 	return flattened
 }
 
-// VaultNaVaultNamespaceSet takes the structure returned by VaultPolicies and
+// VaultNamespaceSet takes the structure returned by VaultPolicies and
 // returns a set of required namespaces
 func VaultNamespaceSet(policies map[string]map[string]*Vault) []string {
 	set := make(map[string]struct{})
