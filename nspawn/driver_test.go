@@ -51,8 +51,29 @@ func alpineConfig(cmd string) *MachineConfig {
 			Type:   "tar",
 			Verify: "checksum",
 		},
-		ProcessTwo: true,
-		ResolvConf: "copy-host",
+		ProcessTwo:  true,
+		ResolvConf:  "copy-host",
+		NetworkVeth: true,
+	}
+}
+
+func alpineDockerConfig(cmd string) *MachineConfig {
+	if len(cmd) == 0 {
+		cmd = "sleep 5"
+	}
+
+	return &MachineConfig{
+		Boot:      false,
+		Command:   []string{"/bin/sh", "-c", "ip link set host0 up; udhcpc -i host0; " + cmd},
+		Ephemeral: true,
+		Image:     "alpine-docker",
+		ImageDownload: &ImageDownloadOpts{
+			URL:    "alpine:latest",
+			Type:   "docker",
+			Verify: "no",
+		},
+		ProcessTwo:  true,
+		ResolvConf:  "copy-host",
 		NetworkVeth: true,
 	}
 }
@@ -67,7 +88,7 @@ func debianConfig() *MachineConfig {
 			Type:   "tar",
 			Verify: "no",
 		},
-		ResolvConf: "copy-host",
+		ResolvConf:  "copy-host",
 		NetworkVeth: true,
 	}
 }
@@ -106,7 +127,7 @@ func TestNspawnDriver_StartWait(t *testing.T) {
 		Resources: testResources,
 	}
 
-	require.NoError(task.EncodeConcreteDriverConfig(alpineConfig("")))
+	require.NoError(task.EncodeConcreteDriverConfig(alpineDockerConfig("")))
 
 	cleanup := harness.MkAllocDir(task, true)
 	defer cleanup()
@@ -119,7 +140,7 @@ func TestNspawnDriver_StartWait(t *testing.T) {
 	result := <-ch
 	require.Zero(result.ExitCode)
 
-	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
+	require.NoError(harness.StopTask(task.ID, 10*time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
 
@@ -328,7 +349,7 @@ func TestNspawnDriver_Start_Wait_AllocDir(t *testing.T) {
 	require.NoError(err)
 	require.Exactly(exp, act)
 
-	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
+	require.NoError(harness.StopTask(task.ID, 10*time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
 
@@ -369,7 +390,7 @@ func TestNspawnDriver_HandlerExec(t *testing.T) {
 		t.Fatalf("expected output to contain %q but found: %q", expected, res.Stdout)
 	}
 
-	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
+	require.NoError(harness.StopTask(task.ID, 10*time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
 
@@ -415,7 +436,7 @@ func TestNspawnDriver_PortMap(t *testing.T) {
 	handle, _, err = harness.StartTask(task)
 	require.NoError(err)
 	require.NotNil(handle)
-	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
+	require.NoError(harness.StopTask(task.ID, 10*time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
 
@@ -436,7 +457,7 @@ func TestNspawnDriver_Ports(t *testing.T) {
 	defer cleanup()
 
 	taskCfg := alpineConfig("")
-	taskCfg.Ports = []string{"foo","bar"}
+	taskCfg.Ports = []string{"foo", "bar"}
 
 	require.NoError(task.EncodeConcreteDriverConfig(taskCfg))
 
@@ -450,13 +471,13 @@ func TestNspawnDriver_Ports(t *testing.T) {
 			Label:  "foo",
 			HostIP: "127.0.0.1",
 			Value:  54321,
-			To: 8080,
+			To:     8080,
 		},
 		{
 			Label:  "bar",
 			HostIP: "127.0.0.1",
 			Value:  54320,
-			To: 9090,
+			To:     9090,
 		},
 	}
 
@@ -464,7 +485,7 @@ func TestNspawnDriver_Ports(t *testing.T) {
 	handle, _, err = harness.StartTask(task)
 	require.NoError(err)
 	require.NotNil(handle)
-	require.NoError(harness.StopTask(task.ID, 10 * time.Second, ""))
+	require.NoError(harness.StopTask(task.ID, 10*time.Second, ""))
 	require.NoError(harness.DestroyTask(task.ID, true))
 }
 
@@ -485,7 +506,7 @@ func TestNspawnDriver_PortsAndPortMap(t *testing.T) {
 	defer cleanup()
 
 	taskCfg := alpineConfig("")
-	taskCfg.Ports = []string{"foo","bar"}
+	taskCfg.Ports = []string{"foo", "bar"}
 	taskCfg.PortMap = make(hclutils.MapStrInt)
 	taskCfg.PortMap["foo"] = 8080
 	taskCfg.PortMap["bar"] = 9090

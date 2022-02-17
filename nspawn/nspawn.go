@@ -2,6 +2,7 @@ package nspawn
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -11,6 +12,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/coreos/go-iptables/iptables"
 	systemdDbus "github.com/coreos/go-systemd/dbus"
@@ -27,8 +32,11 @@ const (
 	dbusInterface      = "org.freedesktop.machine1.Manager"
 	dbusPath           = "/org/freedesktop/machine1"
 
-	TarImage string = "tar"
-	RawImage string = "raw"
+	DockerImage string = "docker"
+	TarImage    string = "tar"
+	RawImage    string = "raw"
+
+	ImagePath string = "/var/lib/machines"
 )
 
 var (
@@ -281,7 +289,7 @@ func (c *MachineConfig) Validate() error {
 
 	if c.ImageDownload != nil {
 		switch c.ImageDownload.Type {
-		case "raw", "tar":
+		case DockerImage, RawImage, TarImage:
 		default:
 			return fmt.Errorf("invalid parameter for image_download.type")
 		}
@@ -539,7 +547,9 @@ func DownloadImage(url, name, verify, imageType string, force bool, logger hclog
 		return err
 	}
 
-	if imageType != TarImage && imageType != RawImage {
+	switch imageType {
+	case DockerImage, RawImage, TarImage:
+	default:
 		return fmt.Errorf("unsupported image type")
 	}
 
@@ -578,6 +588,8 @@ func DownloadImage(url, name, verify, imageType string, force bool, logger hclog
 
 	var t *import1.Transfer
 	switch imageType {
+	case DockerImage:
+		t, err = PullDocker(c, url, name, force)
 	case TarImage:
 		t, err = c.PullTar(url, name, verify, force)
 	case RawImage:
@@ -643,4 +655,46 @@ func (c *MachineConfig) GetImagePath() (string, error) {
 		return "", err
 	}
 	return p.Path, nil
+}
+
+func PullDocker(c *import1.Conn, url, image string, force bool) (*import1.Transfer, error) {
+	// validate image referece
+	ref, err := name.ParseReference(url)
+	if err != nil {
+		return nil, err
+	}
+
+	// check if image exists
+	img, err := remote.Image(ref)
+	if err != nil {
+		return nil, err
+	}
+
+	// create temporary downöoad dir
+	tmpDir, err := os.MkdirTemp(ImagePath, ".tar-docker:"+url)
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmpDir + "/" + image + ".tar"
+
+	// extract docker image to flattened tar archive
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = io.Copy(f, mutate.Extract(img))
+	if err != nil {
+		return nil, err
+	}
+	f.Close()
+
+	// reopen archive read-only
+	f, err = os.Open(tmpPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// import tar archive
+	return c.ImportTar(f, image, force, false)
 }
