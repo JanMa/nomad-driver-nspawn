@@ -71,6 +71,7 @@ func alpineDockerConfig(cmd string) *MachineConfig {
 			URL:    "alpine:latest",
 			Type:   "docker",
 			Verify: "no",
+			Force:  true,
 		},
 		ProcessTwo:  true,
 		ResolvConf:  "copy-host",

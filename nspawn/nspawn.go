@@ -670,13 +670,34 @@ func PullDocker(c *import1.Conn, url, image string, force bool) (*import1.Transf
 		return nil, err
 	}
 
-	// create temporary downöoad dir
-	tmpDir, err := os.MkdirTemp(ImagePath, ".tar-docker:"+url)
+	// create temporary download dir
+	tmpDir := ImagePath + "/.tar-docker:" + url
+	err = os.MkdirAll(tmpDir, 0755)
 	if err != nil {
 		return nil, err
 	}
 	tmpPath := tmpDir + "/" + image + ".tar"
 
+	//check if archive already exists
+	_, err = os.Stat(tmpPath)
+	if !os.IsNotExist(err) && force {
+		// archive exists and force
+		// remove existing archive
+		remErr := os.Remove(tmpPath)
+		if remErr != nil {
+			return nil, remErr
+		}
+	} else if !os.IsNotExist(err) && !force {
+		// archive exists and not force
+		// import existing archive
+		f, err := os.Open(tmpPath)
+		if err != nil {
+			return nil, err
+		}
+		return c.ImportTar(f, image, force, false)
+	}
+
+	// archive does not exist
 	// extract docker image to flattened tar archive
 	f, err := os.Create(tmpPath)
 	if err != nil {
