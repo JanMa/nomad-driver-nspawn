@@ -47,7 +47,7 @@ func alpineConfig(cmd string) *MachineConfig {
 		Ephemeral: true,
 		Image:     "alpine",
 		ImageDownload: &ImageDownloadOpts{
-			URL:    "http://dl-cdn.alpinelinux.org/alpine/v3.12/releases/x86_64/alpine-minirootfs-3.12.0-x86_64.tar.gz",
+			URL:    "https://dl-cdn.alpinelinux.org/alpine/v3.15/releases/x86_64/alpine-minirootfs-3.15.0-x86_64.tar.gz",
 			Type:   "tar",
 			Verify: "checksum",
 		},
@@ -84,7 +84,7 @@ func debianConfig() *MachineConfig {
 		Ephemeral: true,
 		Image:     "debian",
 		ImageDownload: &ImageDownloadOpts{
-			URL:    "https://nspawn.org/storage/debian/buster/tar/image.tar.xz",
+			URL:    "https://hub.nspawn.org/storage/debian/buster/tar/image.tar.zstd",
 			Type:   "tar",
 			Verify: "no",
 		},
