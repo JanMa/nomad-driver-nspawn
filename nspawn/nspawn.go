@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"net"
+	nUrl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -671,7 +672,7 @@ func PullDocker(c *import1.Conn, url, image string, force bool) (*import1.Transf
 	}
 
 	// create temporary download dir
-	tmpDir := ImagePath + "/.tar-docker:" + url
+	tmpDir := ImagePath + "/.tar-docker:" + nUrl.PathEscape(url)
 	err = os.MkdirAll(tmpDir, 0755)
 	if err != nil {
 		return nil, err
