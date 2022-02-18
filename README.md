@@ -9,8 +9,8 @@ Nomad task.
 
 ## Client requirements
 
-* [Nomad](https://nomadproject.io) 1.1.0+ running as `root`
-* [Go](https://golang.org/doc/install) 1.15
+* [Nomad](https://nomadproject.io) 1.2.0+ running as `root`
+* [Go](https://golang.org/doc/install) 1.17
 * Linux
 * [`systemd-nspawn`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html)
   installed
@@ -184,11 +184,13 @@ should cover a broad range of use cases:
   only be part of one zone, but each zone may contain any number of containers.
 
 The `image_download` block supports the following arguments:
-* `url` - The URL of the image to download. The URL must be of type `http://` or
-  `https://`. **This option is mandatory**.
+* `url` - The URL of the image to download. The URL must be of type `http://`,
+  `https://` or a valid `docker` image reference. **This option is mandatory**.
 * [`verify`](https://www.freedesktop.org/software/systemd/man/machinectl.html#pull-tar%20URL%20%5BNAME%5D) -
   (Optional) `no` (default), `signature` or `checksum`. Whether to verify the
-  image before making it available.
+  image before making it available. This option has no effect when downloading
+  `docker` images.
 * `force` - (Optional) `true` or `false` (default) If a local copy already
   exists, delete it first and replace it by the newly downloaded image.
-* `type` - (Optional) `tar` (default) or `raw`. The type of image to download.
+* `type` - (Optional) `tar` (default), `raw` or `docker`. The type of image to
+  download.
