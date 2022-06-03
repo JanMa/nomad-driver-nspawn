@@ -13,6 +13,7 @@ const (
 	errNoRegionPath               = "No path to region"
 	errTokenNotFound              = "ACL token not found"
 	errPermissionDenied           = "Permission denied"
+	errJobRegistrationDisabled    = "Job registration, dispatch, and scale are disabled by the scheduler configuration"
 	errNoNodeConn                 = "No path to node"
 	errUnknownMethod              = "Unknown rpc method"
 	errUnknownNomadVersion        = "Unable to determine Nomad version"
@@ -46,6 +47,7 @@ var (
 	ErrNoRegionPath               = errors.New(errNoRegionPath)
 	ErrTokenNotFound              = errors.New(errTokenNotFound)
 	ErrPermissionDenied           = errors.New(errPermissionDenied)
+	ErrJobRegistrationDisabled    = errors.New(errJobRegistrationDisabled)
 	ErrNoNodeConn                 = errors.New(errNoNodeConn)
 	ErrUnknownMethod              = errors.New(errUnknownMethod)
 	ErrUnknownNomadVersion        = errors.New(errUnknownNomadVersion)
@@ -64,8 +66,10 @@ var (
 	ErrDeploymentTerminalNoSetHealth = errors.New(errDeploymentTerminalNoSetHealth)
 	ErrDeploymentRunningNoUnblock    = errors.New(errDeploymentRunningNoUnblock)
 
-	ErrCSIClientRPCIgnorable = errors.New("CSI client error (ignorable)")
-	ErrCSIClientRPCRetryable = errors.New("CSI client error (retryable)")
+	ErrCSIClientRPCIgnorable  = errors.New("CSI client error (ignorable)")
+	ErrCSIClientRPCRetryable  = errors.New("CSI client error (retryable)")
+	ErrCSIVolumeMaxClaims     = errors.New("volume max claims reached")
+	ErrCSIVolumeUnschedulable = errors.New("volume is currently unschedulable")
 )
 
 // IsErrNoLeader returns whether the error is due to there being no leader.
@@ -175,6 +179,10 @@ func IsErrUnknownNomadVersion(err error) bool {
 // unable to connect to a client node because the client is too old (pre-v0.8).
 func IsErrNodeLacksRpc(err error) bool {
 	return err != nil && strings.Contains(err.Error(), errNodeLacksRpc)
+}
+
+func IsErrNoSuchFileOrDirectory(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no such file or directory")
 }
 
 // NewErrRPCCoded wraps an RPC error with a code to be converted to HTTP status
