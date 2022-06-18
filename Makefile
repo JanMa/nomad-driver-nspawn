@@ -54,7 +54,7 @@ clean:
 .go117:
 		@echo Installing Go 1.17
 		cd $$HOME
-		go get -v golang.org/dl/go1.17
+		go install -v golang.org/dl/go1.17@latest
 		$(GO117) download
 		cd $$OLDPWD
 		touch .go117
