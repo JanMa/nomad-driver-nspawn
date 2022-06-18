@@ -85,7 +85,7 @@ func debianConfig() *MachineConfig {
 		Ephemeral: true,
 		Image:     "debian",
 		ImageDownload: &ImageDownloadOpts{
-			URL:    "https://hub.nspawn.org/storage/debian/buster/tar/image.tar.zstd",
+			URL:    "https://hub.nspawn.org/storage/debian/bullseye/tar/image.tar.xz",
 			Type:   "tar",
 			Verify: "no",
 		},
