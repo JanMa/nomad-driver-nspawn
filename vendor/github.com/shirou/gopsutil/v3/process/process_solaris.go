@@ -27,8 +27,7 @@ type MemoryMapsStat struct {
 	Swap         uint64 `json:"swap"`
 }
 
-type MemoryInfoExStat struct {
-}
+type MemoryInfoExStat struct{}
 
 func pidsWithContext(ctx context.Context) ([]int32, error) {
 	return readPidsFromDir(common.HostProc())
@@ -191,6 +190,10 @@ func (p *Process) ConnectionsMaxWithContext(ctx context.Context, max int) ([]net
 }
 
 func (p *Process) MemoryMapsWithContext(ctx context.Context, grouped bool) (*[]MemoryMapsStat, error) {
+	return nil, common.ErrNotImplementedError
+}
+
+func (p *Process) EnvironWithContext(ctx context.Context) ([]string, error) {
 	return nil, common.ErrNotImplementedError
 }
 

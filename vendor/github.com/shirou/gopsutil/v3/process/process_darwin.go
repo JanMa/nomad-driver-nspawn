@@ -1,3 +1,4 @@
+//go:build darwin
 // +build darwin
 
 package process
@@ -100,30 +101,9 @@ func (p *Process) NameWithContext(ctx context.Context) (string, error) {
 	return name, nil
 }
 
-func (p *Process) CmdlineWithContext(ctx context.Context) (string, error) {
-	r, err := callPsWithContext(ctx, "command", p.Pid, false, false)
-	if err != nil {
-		return "", err
-	}
-	return strings.Join(r[0], " "), err
-}
-
 // cmdNameWithContext returns the command name (including spaces) without any arguments
 func (p *Process) cmdNameWithContext(ctx context.Context) ([]string, error) {
 	r, err := callPsWithContext(ctx, "command", p.Pid, false, true)
-	if err != nil {
-		return nil, err
-	}
-	return r[0], err
-}
-
-// CmdlineSliceWithContext returns the command line arguments of the process as a slice with each
-// element being an argument. Because of current deficiencies in the way that the command
-// line arguments are found, single arguments that have spaces in the will actually be
-// reported as two separate items. In order to do something better CGO would be needed
-// to use the native darwin functions.
-func (p *Process) CmdlineSliceWithContext(ctx context.Context) ([]string, error) {
-	r, err := callPsWithContext(ctx, "command", p.Pid, false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +126,7 @@ func (p *Process) createTimeWithContext(ctx context.Context) (int64, error) {
 		elapsedDurations = append(elapsedDurations, time.Duration(p))
 	}
 
-	var elapsed = time.Duration(elapsedDurations[0]) * time.Second
+	elapsed := time.Duration(elapsedDurations[0]) * time.Second
 	if len(elapsedDurations) > 1 {
 		elapsed += time.Duration(elapsedDurations[1]) * time.Minute
 	}
@@ -326,7 +306,6 @@ func convertCPUTimes(s string) (ret float64, err error) {
 
 func (p *Process) TimesWithContext(ctx context.Context) (*cpu.TimesStat, error) {
 	r, err := callPsWithContext(ctx, "utime,stime", p.Pid, false, false)
-
 	if err != nil {
 		return nil, err
 	}
