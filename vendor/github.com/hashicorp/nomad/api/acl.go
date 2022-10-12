@@ -42,7 +42,7 @@ func (a *ACLPolicies) Delete(policyName string, q *WriteOptions) (*WriteMeta, er
 	if policyName == "" {
 		return nil, fmt.Errorf("missing policy name")
 	}
-	wm, err := a.client.delete("/v1/acl/policy/"+policyName, nil, q)
+	wm, err := a.client.delete("/v1/acl/policy/"+policyName, nil, nil, q)
 	if err != nil {
 		return nil, err
 	}
@@ -72,10 +72,28 @@ func (c *Client) ACLTokens() *ACLTokens {
 	return &ACLTokens{client: c}
 }
 
+// DEPRECATED: will be removed in Nomad 1.5.0
 // Bootstrap is used to get the initial bootstrap token
 func (a *ACLTokens) Bootstrap(q *WriteOptions) (*ACLToken, *WriteMeta, error) {
 	var resp ACLToken
 	wm, err := a.client.write("/v1/acl/bootstrap", nil, &resp, q)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &resp, wm, nil
+}
+
+// BootstrapOpts is used to get the initial bootstrap token or pass in the one that was provided in the API
+func (a *ACLTokens) BootstrapOpts(btoken string, q *WriteOptions) (*ACLToken, *WriteMeta, error) {
+	if q == nil {
+		q = &WriteOptions{}
+	}
+	req := &BootstrapRequest{
+		BootstrapSecret: btoken,
+	}
+
+	var resp ACLToken
+	wm, err := a.client.write("/v1/acl/bootstrap", req, &resp, q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -124,7 +142,7 @@ func (a *ACLTokens) Delete(accessorID string, q *WriteOptions) (*WriteMeta, erro
 	if accessorID == "" {
 		return nil, fmt.Errorf("missing accessor ID")
 	}
-	wm, err := a.client.delete("/v1/acl/token/"+accessorID, nil, q)
+	wm, err := a.client.delete("/v1/acl/token/"+accessorID, nil, nil, q)
 	if err != nil {
 		return nil, err
 	}
@@ -243,4 +261,9 @@ type OneTimeTokenExchangeRequest struct {
 
 type OneTimeTokenExchangeResponse struct {
 	Token *ACLToken
+}
+
+// BootstrapRequest is used for when operators provide an ACL Bootstrap Token
+type BootstrapRequest struct {
+	BootstrapSecret string
 }

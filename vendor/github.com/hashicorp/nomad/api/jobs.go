@@ -20,6 +20,10 @@ const (
 	// JobTypeSystem indicates a system process that should run on all clients
 	JobTypeSystem = "system"
 
+	// JobTypeSysbatch indicates a short-lived system process that should run
+	// on all clients.
+	JobTypeSysbatch = "sysbatch"
+
 	// PeriodicSpecCron is used for a cron spec.
 	PeriodicSpecCron = "cron"
 
@@ -65,12 +69,21 @@ func (c *Client) Jobs() *Jobs {
 
 // ParseHCL is used to convert the HCL repesentation of a Job to JSON server side.
 // To parse the HCL client side see package github.com/hashicorp/nomad/jobspec
+// Use ParseHCLOpts if you need to customize JobsParseRequest.
 func (j *Jobs) ParseHCL(jobHCL string, canonicalize bool) (*Job, error) {
-	var job Job
 	req := &JobsParseRequest{
 		JobHCL:       jobHCL,
 		Canonicalize: canonicalize,
 	}
+	return j.ParseHCLOpts(req)
+}
+
+// ParseHCLOpts is used to convert the HCL representation of a Job to JSON
+// server side. To parse the HCL client side see package
+// github.com/hashicorp/nomad/jobspec.
+// ParseHCL is an alternative convenience API for HCLv2 users.
+func (j *Jobs) ParseHCLOpts(req *JobsParseRequest) (*Job, error) {
+	var job Job
 	_, err := j.client.write("/v1/jobs/parse", req, &job, nil)
 	return &job, err
 }
@@ -275,7 +288,7 @@ func (j *Jobs) Evaluations(jobID string, q *QueryOptions) ([]*Evaluation, *Query
 // eventually GC'ed from the system. Most callers should not specify purge.
 func (j *Jobs) Deregister(jobID string, purge bool, q *WriteOptions) (string, *WriteMeta, error) {
 	var resp JobDeregisterResponse
-	wm, err := j.client.delete(fmt.Sprintf("/v1/job/%v?purge=%t", url.PathEscape(jobID), purge), &resp, q)
+	wm, err := j.client.delete(fmt.Sprintf("/v1/job/%v?purge=%t", url.PathEscape(jobID), purge), nil, &resp, q)
 	if err != nil {
 		return "", nil, err
 	}
@@ -321,7 +334,7 @@ func (j *Jobs) DeregisterOpts(jobID string, opts *DeregisterOptions, q *WriteOpt
 			opts.Purge, opts.Global, opts.EvalPriority, opts.NoShutdownDelay)
 	}
 
-	wm, err := j.client.delete(endpoint, &resp, q)
+	wm, err := j.client.delete(endpoint, nil, &resp, q)
 	if err != nil {
 		return "", nil, err
 	}
@@ -432,8 +445,8 @@ func (j *Jobs) Revert(jobID string, version uint64, enforcePriorVersion *uint64,
 		JobID:               jobID,
 		JobVersion:          version,
 		EnforcePriorVersion: enforcePriorVersion,
-		// ConsulToken:         consulToken, // TODO(shoenig) enable!
-		VaultToken: vaultToken,
+		ConsulToken:         consulToken,
+		VaultToken:          vaultToken,
 	}
 	wm, err := j.client.write("/v1/job/"+url.PathEscape(jobID)+"/revert", req, &resp, q)
 	if err != nil {
@@ -1074,6 +1087,13 @@ func NewBatchJob(id, name, region string, pri int) *Job {
 // the relative job priority.
 func NewSystemJob(id, name, region string, pri int) *Job {
 	return newJob(id, name, region, JobTypeSystem, pri)
+}
+
+// NewSysbatchJob creates and returns a new sysbatch-style job for short-lived
+// processes designed to run on all clients, using the provided name and ID
+// along with the relative job priority.
+func NewSysbatchJob(id, name, region string, pri int) *Job {
+	return newJob(id, name, region, JobTypeSysbatch, pri)
 }
 
 // newJob is used to create a new Job struct.

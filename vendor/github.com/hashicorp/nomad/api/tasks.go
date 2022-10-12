@@ -855,7 +855,6 @@ type Vault struct {
 	Policies     []string `hcl:"policies,optional"`
 	Namespace    *string  `mapstructure:"namespace" hcl:"namespace,optional"`
 	Env          *bool    `hcl:"env,optional"`
-	EntityAlias  *string  `mapstructure:"entity_alias" hcl:"entity_alias,optional"`
 	ChangeMode   *string  `mapstructure:"change_mode" hcl:"change_mode,optional"`
 	ChangeSignal *string  `mapstructure:"change_signal" hcl:"change_signal,optional"`
 }
@@ -866,9 +865,6 @@ func (v *Vault) Canonicalize() {
 	}
 	if v.Namespace == nil {
 		v.Namespace = stringToPtr("")
-	}
-	if v.EntityAlias == nil {
-		v.EntityAlias = stringToPtr("")
 	}
 	if v.ChangeMode == nil {
 		v.ChangeMode = stringToPtr("restart")
@@ -1043,10 +1039,18 @@ type TaskCSIPluginConfig struct {
 	//
 	// Default is /csi.
 	MountDir string `mapstructure:"mount_dir" hcl:"mount_dir,optional"`
+
+	// HealthTimeout is the time after which the CSI plugin tasks will be killed
+	// if the CSI Plugin is not healthy.
+	HealthTimeout time.Duration `mapstructure:"health_timeout" hcl:"health_timeout,optional"`
 }
 
 func (t *TaskCSIPluginConfig) Canonicalize() {
 	if t.MountDir == "" {
 		t.MountDir = "/csi"
+	}
+
+	if t.HealthTimeout == 0 {
+		t.HealthTimeout = 30 * time.Second
 	}
 }

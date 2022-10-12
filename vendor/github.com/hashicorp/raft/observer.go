@@ -10,7 +10,7 @@ type Observation struct {
 	// Raft holds the Raft instance generating the observation.
 	Raft *Raft
 	// Data holds observation-specific data. Possible types are
-	// *RequestVoteRequest
+	// RequestVoteRequest
 	// RaftState
 	// PeerObservation
 	// LeaderObservation
@@ -19,7 +19,10 @@ type Observation struct {
 
 // LeaderObservation is used for the data when leadership changes.
 type LeaderObservation struct {
-	Leader ServerAddress
+	// DEPRECATED The LeaderAddr field should now be used
+	Leader     ServerAddress
+	LeaderAddr ServerAddress
+	LeaderID   ServerID
 }
 
 // PeerObservation is sent to observers when peers change.

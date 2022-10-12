@@ -86,7 +86,6 @@ type ServiceRegistrationStub struct {
 	Tags []string
 }
 
-
 // Services is used to query the service endpoints.
 type Services struct {
 	client *Client
@@ -123,7 +122,7 @@ func (s *Services) Get(serviceName string, q *QueryOptions) ([]*ServiceRegistrat
 // by its service name and service ID.
 func (s *Services) Delete(serviceName, serviceID string, q *WriteOptions) (*WriteMeta, error) {
 	path := fmt.Sprintf("/v1/service/%s/%s", url.PathEscape(serviceName), url.PathEscape(serviceID))
-	wm, err := s.client.delete(path, nil, q)
+	wm, err := s.client.delete(path, nil, nil, q)
 	if err != nil {
 		return nil, err
 	}
@@ -195,10 +194,8 @@ func (c *CheckRestart) Merge(o *CheckRestart) *CheckRestart {
 	return nc
 }
 
-// ServiceCheck represents the consul health check that Nomad registers.
+// ServiceCheck represents a Nomad job-submitters view of a Consul service health check.
 type ServiceCheck struct {
-	//FIXME Id is unused. Remove?
-	Id                     string              `hcl:"id,optional"`
 	Name                   string              `hcl:"name,optional"`
 	Type                   string              `hcl:"type,optional"`
 	Command                string              `hcl:"command,optional"`
@@ -208,6 +205,7 @@ type ServiceCheck struct {
 	PortLabel              string              `mapstructure:"port" hcl:"port,optional"`
 	Expose                 bool                `hcl:"expose,optional"`
 	AddressMode            string              `mapstructure:"address_mode" hcl:"address_mode,optional"`
+	Advertise              string              `hcl:"advertise,optional"`
 	Interval               time.Duration       `hcl:"interval,optional"`
 	Timeout                time.Duration       `hcl:"timeout,optional"`
 	InitialStatus          string              `mapstructure:"initial_status" hcl:"initial_status,optional"`
@@ -224,27 +222,26 @@ type ServiceCheck struct {
 	OnUpdate               string              `mapstructure:"on_update" hcl:"on_update,optional"`
 }
 
-// Service represents a Consul service definition.
+// Service represents a Nomad job-submitters view of a Consul or Nomad service.
 type Service struct {
-	//FIXME Id is unused. Remove?
-	Id                string            `hcl:"id,optional"`
 	Name              string            `hcl:"name,optional"`
 	Tags              []string          `hcl:"tags,optional"`
 	CanaryTags        []string          `mapstructure:"canary_tags" hcl:"canary_tags,optional"`
 	EnableTagOverride bool              `mapstructure:"enable_tag_override" hcl:"enable_tag_override,optional"`
 	PortLabel         string            `mapstructure:"port" hcl:"port,optional"`
 	AddressMode       string            `mapstructure:"address_mode" hcl:"address_mode,optional"`
+	Address           string            `hcl:"address,optional"`
 	Checks            []ServiceCheck    `hcl:"check,block"`
 	CheckRestart      *CheckRestart     `mapstructure:"check_restart" hcl:"check_restart,block"`
 	Connect           *ConsulConnect    `hcl:"connect,block"`
 	Meta              map[string]string `hcl:"meta,block"`
 	CanaryMeta        map[string]string `hcl:"canary_meta,block"`
+	TaggedAddresses   map[string]string `hcl:"tagged_addresses,block"`
 	TaskName          string            `mapstructure:"task" hcl:"task,optional"`
 	OnUpdate          string            `mapstructure:"on_update" hcl:"on_update,optional"`
 
-	// Provider defines which backend system provides the service registration
-	// mechanism for this service. This supports either structs.ProviderConsul
-	// or structs.ProviderNomad and defaults for the former.
+	// Provider defines which backend system provides the service registration,
+	// either "consul" (default) or "nomad".
 	Provider string `hcl:"provider,optional"`
 }
 
@@ -282,6 +279,18 @@ func (s *Service) Canonicalize(t *Task, tg *TaskGroup, job *Job) {
 	// Default the service provider.
 	if s.Provider == "" {
 		s.Provider = ServiceProviderConsul
+	}
+
+	if len(s.Meta) == 0 {
+		s.Meta = nil
+	}
+
+	if len(s.CanaryMeta) == 0 {
+		s.CanaryMeta = nil
+	}
+
+	if len(s.TaggedAddresses) == 0 {
+		s.TaggedAddresses = nil
 	}
 
 	s.Connect.Canonicalize()
