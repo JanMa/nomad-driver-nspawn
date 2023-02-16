@@ -85,8 +85,8 @@ func debianConfig() *MachineConfig {
 		Ephemeral: true,
 		Image:     "debian",
 		ImageDownload: &ImageDownloadOpts{
-			URL:    "https://hub.nspawn.org/storage/debian/bullseye/tar/image.tar.xz",
-			Type:   "tar",
+			URL:    "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2",
+			Type:   "raw",
 			Verify: "no",
 		},
 		ResolvConf:  "copy-host",
