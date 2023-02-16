@@ -6,6 +6,7 @@ GO117 := $(GOPATH)/bin/go1.17
 GO117_INSTALLED := $(shell $GO117 version 2> /dev/null)
 BUILDARGS := build -mod=vendor -a -v -ldflags '-extldflags "-static" -X github.com/JanMa/nomad-driver-nspawn/nspawn.pluginVersion=${VERSION}' -o $(BINARY)
 
+.DELETE_ON_ERROR:
 .PHONY: docker-image get tidy vendor test cover clean
 
 build: $(BINARY)
@@ -26,23 +27,23 @@ nspawn/*.go:
 docker-image:
 		sudo docker pull golang:1.17-alpine
 
-get:
-		GO111MODULE=on go get -v
+get: | .go117
+		GO111MODULE=on $(GO117) get -v
 
-tidy: get
-		GO111MODULE=on go mod tidy -v
+tidy: get | .go117
+		GO111MODULE=on $(GO117) mod tidy -v
 
-vendor:	tidy
-		GO111MODULE=on go mod vendor -v
+vendor:	tidy | .go117
+		GO111MODULE=on $(GO117) mod vendor -v
 
 nspawn.test: *.go nspawn/*.go | .go117
-		go test -c ./nspawn
+		$(GO117) test -c ./nspawn
 
 test: nspawn.test
 		sudo ./nspawn.test
 
 nspawn.cover: *.go nspawn/*.go | .go117
-		go test -cover -c ./nspawn -o nspawn.cover
+		$(GO117) test -cover -c ./nspawn -o nspawn.cover
 
 cover: nspawn.cover
 		sudo ./nspawn.cover
