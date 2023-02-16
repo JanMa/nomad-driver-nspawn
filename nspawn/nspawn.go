@@ -158,7 +158,7 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 			c.PrivateUsers = "pick"
 		}
 		if c.PrivateUsersOwnership == "" {
-			c.PrivateUsers = "auto"
+			c.PrivateUsersOwnership = "auto"
 		}
 		args = append(args, fmt.Sprintf("--private-users=%s", c.PrivateUsers))
 		args = append(args, fmt.Sprintf("--private-users-ownership=%s", c.PrivateUsersOwnership))
