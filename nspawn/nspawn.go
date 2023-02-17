@@ -80,6 +80,7 @@ type MachineConfig struct {
 	NetworkNamespace string             `codec:"network_namespace"`
 	NetworkVeth      bool               `codec:"network_veth"`
 	NetworkZone      string             `codec:"network_zone"`
+	NetworkBridge    string             `codec:"network_bridge"`
 	PivotRoot        string             `codec:"pivot_root"`
 	Port             hclutils.MapStrStr `codec:"port"`
 	Ports            []string           `codec:"ports"` // :-(
@@ -204,6 +205,9 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	}
 	if len(c.NetworkZone) > 0 {
 		args = append(args, fmt.Sprintf("--network-zone=%s", c.NetworkZone))
+	}
+	if len(c.NetworkBridge) > 0 {
+		args = append(args, fmt.Sprintf("--network-bridge=%s", c.NetworkBridge))
 	}
 	if len(c.Command) > 0 {
 		args = append(args, c.Command...)
