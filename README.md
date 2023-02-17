@@ -179,6 +179,9 @@ should cover a broad range of use cases:
 * [`network_veth`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#-n) -
   (Optional) `true` (default) or `false`. Create a virtual ethernet link between
   the host and the container.
+* [`network_bridge`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--network-bridge=) -
+  (Optional) Attach the virtual container interface to a host side bridge that
+  must already exist.
 * [`network_zone`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--network-zone=) -
   (Optional) Start the container in the given network zone. Each container may
   only be part of one zone, but each zone may contain any number of containers.

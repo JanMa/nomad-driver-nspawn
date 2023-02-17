@@ -114,6 +114,7 @@ var (
 		"ports":             hclspec.NewAttr("ports", "list(string)", false),
 		"capability":        hclspec.NewAttr("capability", "list(string)", false),
 		"network_zone":      hclspec.NewAttr("network_zone", "string", false),
+		"network_bridge":    hclspec.NewAttr("network_bridge", "string", false),
 	})
 
 	// capabilities is returned by the Capabilities RPC and indicates what
