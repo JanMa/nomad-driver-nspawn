@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -83,7 +84,10 @@ func debianConfig() *MachineConfig {
 	return &MachineConfig{
 		Boot:      true,
 		Ephemeral: true,
-		Image:     "debian",
+		Environment: hclutils.MapStrStr{
+			"SYSTEMD_UNIT_PATH": "/local/systemd:",
+		},
+		Image: "debian",
 		ImageDownload: &ImageDownloadOpts{
 			URL:    "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2",
 			Type:   "raw",
@@ -372,6 +376,14 @@ func TestNspawnDriver_HandlerExec(t *testing.T) {
 	cleanup := harness.MkAllocDir(task, true)
 	defer cleanup()
 
+	unitFile := `[Unit]
+Wants=systemd-networkd.service
+Wants=systemd-resolved.service`
+
+	err := os.MkdirAll(filepath.Join(task.TaskDir().LocalDir, "systemd", "multi-user.target.d"), 0755)
+	require.NoError(err)
+	err = ioutil.WriteFile(filepath.Join(task.TaskDir().LocalDir, "systemd", "multi-user.target.d", "wants.conf"), []byte(unitFile), 0644)
+	require.NoError(err)
 	require.NoError(task.EncodeConcreteDriverConfig(debianConfig()))
 
 	handle, _, err := harness.StartTask(task)
