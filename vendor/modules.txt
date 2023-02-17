@@ -8,12 +8,12 @@ github.com/LK4D4/joincontext
 # github.com/Masterminds/goutils v1.1.1
 ## explicit
 github.com/Masterminds/goutils
-# github.com/Masterminds/semver v1.5.0
-## explicit
-github.com/Masterminds/semver
-# github.com/Masterminds/sprig v2.22.0+incompatible
-## explicit
-github.com/Masterminds/sprig
+# github.com/Masterminds/semver/v3 v3.1.1
+## explicit; go 1.12
+github.com/Masterminds/semver/v3
+# github.com/Masterminds/sprig/v3 v3.2.0
+## explicit; go 1.13
+github.com/Masterminds/sprig/v3
 # github.com/Microsoft/go-winio v0.5.2
 ## explicit; go 1.13
 github.com/Microsoft/go-winio
@@ -51,7 +51,7 @@ github.com/apparentlymart/go-textseg/v13/textseg
 # github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e
 ## explicit
 github.com/armon/circbuf
-# github.com/armon/go-metrics v0.3.10
+# github.com/armon/go-metrics v0.4.0
 ## explicit; go 1.12
 github.com/armon/go-metrics
 # github.com/armon/go-radix v1.0.0
@@ -153,14 +153,14 @@ github.com/docker/docker/pkg/longpath
 github.com/docker/docker/pkg/pools
 github.com/docker/docker/pkg/stdcopy
 github.com/docker/docker/pkg/system
-# github.com/docker/docker-credential-helpers v0.6.4
-## explicit; go 1.13
+# github.com/docker/docker-credential-helpers v0.7.0
+## explicit; go 1.18
 github.com/docker/docker-credential-helpers/client
 github.com/docker/docker-credential-helpers/credentials
 # github.com/docker/go-connections v0.4.0
 ## explicit
 github.com/docker/go-connections/nat
-# github.com/docker/go-units v0.4.0
+# github.com/docker/go-units v0.5.0
 ## explicit
 github.com/docker/go-units
 # github.com/docker/libnetwork v0.8.0-dev.2.0.20210525090646-64b7a4574d14
@@ -197,6 +197,7 @@ github.com/gogo/protobuf/protoc-gen-gogo/descriptor
 github.com/golang/groupcache/lru
 # github.com/golang/protobuf v1.5.2
 ## explicit; go 1.9
+github.com/golang/protobuf/jsonpb
 github.com/golang/protobuf/proto
 github.com/golang/protobuf/protoc-gen-go/descriptor
 github.com/golang/protobuf/ptypes
@@ -233,7 +234,7 @@ github.com/google/go-containerregistry/pkg/v1/types
 # github.com/google/uuid v1.3.0
 ## explicit
 github.com/google/uuid
-# github.com/gorilla/websocket v1.4.2
+# github.com/gorilla/websocket v1.5.0
 ## explicit; go 1.12
 github.com/gorilla/websocket
 # github.com/grpc-ecosystem/go-grpc-middleware v1.2.1-0.20200228141219-3ce3d519df39
@@ -241,13 +242,13 @@ github.com/gorilla/websocket
 github.com/grpc-ecosystem/go-grpc-middleware/retry
 github.com/grpc-ecosystem/go-grpc-middleware/util/backoffutils
 github.com/grpc-ecosystem/go-grpc-middleware/util/metautils
-# github.com/hashicorp/consul-template v0.29.0
+# github.com/hashicorp/consul-template v0.29.2-0.20220803104536-583050a85eea
 ## explicit; go 1.17
 github.com/hashicorp/consul-template/config
 github.com/hashicorp/consul-template/dependency
 github.com/hashicorp/consul-template/signals
 github.com/hashicorp/consul-template/version
-# github.com/hashicorp/consul/api v1.12.0
+# github.com/hashicorp/consul/api v1.13.0
 ## explicit; go 1.12
 github.com/hashicorp/consul/api
 # github.com/hashicorp/cronexpr v1.1.1
@@ -259,7 +260,7 @@ github.com/hashicorp/errwrap
 # github.com/hashicorp/go-cleanhttp v0.5.2
 ## explicit; go 1.13
 github.com/hashicorp/go-cleanhttp
-# github.com/hashicorp/go-hclog v1.2.0
+# github.com/hashicorp/go-hclog v1.3.1
 ## explicit; go 1.13
 github.com/hashicorp/go-hclog
 # github.com/hashicorp/go-immutable-radix v1.3.1
@@ -287,7 +288,7 @@ github.com/hashicorp/go-secure-stdlib/listenerutil
 # github.com/hashicorp/go-secure-stdlib/mlock v0.1.2
 ## explicit; go 1.16
 github.com/hashicorp/go-secure-stdlib/mlock
-# github.com/hashicorp/go-secure-stdlib/parseutil v0.1.4
+# github.com/hashicorp/go-secure-stdlib/parseutil v0.1.6
 ## explicit; go 1.16
 github.com/hashicorp/go-secure-stdlib/parseutil
 # github.com/hashicorp/go-secure-stdlib/reloadutil v0.1.1
@@ -299,6 +300,9 @@ github.com/hashicorp/go-secure-stdlib/strutil
 # github.com/hashicorp/go-secure-stdlib/tlsutil v0.1.1
 ## explicit; go 1.16
 github.com/hashicorp/go-secure-stdlib/tlsutil
+# github.com/hashicorp/go-set v0.1.6
+## explicit; go 1.18
+github.com/hashicorp/go-set
 # github.com/hashicorp/go-sockaddr v1.0.2
 ## explicit
 github.com/hashicorp/go-sockaddr
@@ -306,7 +310,7 @@ github.com/hashicorp/go-sockaddr/template
 # github.com/hashicorp/go-uuid v1.0.2
 ## explicit
 github.com/hashicorp/go-uuid
-# github.com/hashicorp/go-version v1.4.0
+# github.com/hashicorp/go-version v1.6.0
 ## explicit
 github.com/hashicorp/go-version
 # github.com/hashicorp/golang-lru v0.5.4
@@ -331,8 +335,8 @@ github.com/hashicorp/hcl/v2/ext/customdecode
 github.com/hashicorp/hcl/v2/hcldec
 github.com/hashicorp/hcl/v2/hclsyntax
 github.com/hashicorp/hcl/v2/json
-# github.com/hashicorp/nomad v1.3.1
-## explicit; go 1.17
+# github.com/hashicorp/nomad v1.3.9
+## explicit; go 1.19
 github.com/hashicorp/nomad/acl
 github.com/hashicorp/nomad/ci
 github.com/hashicorp/nomad/client/allocdir
@@ -377,6 +381,7 @@ github.com/hashicorp/nomad/helper/pluginutils/grpcutils
 github.com/hashicorp/nomad/helper/pluginutils/hclspecutils
 github.com/hashicorp/nomad/helper/pluginutils/hclutils
 github.com/hashicorp/nomad/helper/pluginutils/loader
+github.com/hashicorp/nomad/helper/pointer
 github.com/hashicorp/nomad/helper/stats
 github.com/hashicorp/nomad/helper/testlog
 github.com/hashicorp/nomad/helper/uuid
@@ -401,21 +406,24 @@ github.com/hashicorp/nomad/plugins/shared/structs
 github.com/hashicorp/nomad/plugins/shared/structs/proto
 github.com/hashicorp/nomad/testutil
 github.com/hashicorp/nomad/version
-# github.com/hashicorp/nomad/api v0.0.0-20220407202126-2eba643965c4
-## explicit; go 1.17
+# github.com/hashicorp/nomad/api v0.0.0-20221006174558-2aa7e66bdb52
+## explicit; go 1.19
 github.com/hashicorp/nomad/api
 github.com/hashicorp/nomad/api/contexts
-# github.com/hashicorp/raft v1.3.5
-## explicit; go 1.12
+# github.com/hashicorp/raft v1.3.11
+## explicit; go 1.16
 github.com/hashicorp/raft
-# github.com/hashicorp/serf v0.9.7
+# github.com/hashicorp/serf v0.10.0
 ## explicit; go 1.12
 github.com/hashicorp/serf/coordinate
-# github.com/hashicorp/vault/api v1.4.1
-## explicit; go 1.13
+# github.com/hashicorp/vault/api v1.8.1
+## explicit; go 1.17
 github.com/hashicorp/vault/api
-# github.com/hashicorp/vault/sdk v0.4.1
+# github.com/hashicorp/vault/api/auth/kubernetes v0.1.0
 ## explicit; go 1.16
+github.com/hashicorp/vault/api/auth/kubernetes
+# github.com/hashicorp/vault/sdk v0.6.0
+## explicit; go 1.19
 github.com/hashicorp/vault/sdk/helper/certutil
 github.com/hashicorp/vault/sdk/helper/compressutil
 github.com/hashicorp/vault/sdk/helper/consts
@@ -444,7 +452,7 @@ github.com/hpcloud/tail/watch
 # github.com/huandu/xstrings v1.3.2
 ## explicit; go 1.12
 github.com/huandu/xstrings
-# github.com/imdario/mergo v0.3.12
+# github.com/imdario/mergo v0.3.13
 ## explicit; go 1.13
 github.com/imdario/mergo
 # github.com/ishidawataru/sctp v0.0.0-20191218070446-00ab2ac2db07
@@ -462,16 +470,16 @@ github.com/kr/text
 # github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0
 ## explicit; go 1.16
 github.com/lufia/plan9stats
-# github.com/mattn/go-colorable v0.1.12
-## explicit; go 1.13
+# github.com/mattn/go-colorable v0.1.13
+## explicit; go 1.15
 github.com/mattn/go-colorable
-# github.com/mattn/go-isatty v0.0.14
-## explicit; go 1.12
+# github.com/mattn/go-isatty v0.0.16
+## explicit; go 1.15
 github.com/mattn/go-isatty
-# github.com/miekg/dns v1.1.41
-## explicit; go 1.13
+# github.com/miekg/dns v1.1.50
+## explicit; go 1.14
 github.com/miekg/dns
-# github.com/mitchellh/cli v1.1.2
+# github.com/mitchellh/cli v1.1.4
 ## explicit; go 1.11
 github.com/mitchellh/cli
 # github.com/mitchellh/copystructure v1.2.0
@@ -492,7 +500,7 @@ github.com/mitchellh/go-wordwrap
 # github.com/mitchellh/hashstructure v1.1.0
 ## explicit; go 1.14
 github.com/mitchellh/hashstructure
-# github.com/mitchellh/mapstructure v1.4.3
+# github.com/mitchellh/mapstructure v1.5.0
 ## explicit; go 1.14
 github.com/mitchellh/mapstructure
 # github.com/mitchellh/reflectwalk v1.0.2
@@ -586,10 +594,10 @@ github.com/rogpeppe/go-internal/fmtsort
 # github.com/ryanuber/go-glob v1.0.0
 ## explicit
 github.com/ryanuber/go-glob
-# github.com/seccomp/libseccomp-golang v0.9.2-0.20210429002308-3879420cc921
+# github.com/seccomp/libseccomp-golang v0.9.2-0.20220502022130-f33da4d89646
 ## explicit; go 1.14
 github.com/seccomp/libseccomp-golang
-# github.com/shirou/gopsutil/v3 v3.21.12
+# github.com/shirou/gopsutil/v3 v3.22.8
 ## explicit; go 1.15
 github.com/shirou/gopsutil/v3/cpu
 github.com/shirou/gopsutil/v3/disk
@@ -598,20 +606,26 @@ github.com/shirou/gopsutil/v3/internal/common
 github.com/shirou/gopsutil/v3/mem
 github.com/shirou/gopsutil/v3/net
 github.com/shirou/gopsutil/v3/process
+# github.com/shopspring/decimal v1.2.0
+## explicit; go 1.13
+github.com/shopspring/decimal
 # github.com/sirupsen/logrus v1.8.1
 ## explicit; go 1.13
 github.com/sirupsen/logrus
-# github.com/stretchr/testify v1.7.1
+# github.com/spf13/cast v1.3.1
+## explicit
+github.com/spf13/cast
+# github.com/stretchr/testify v1.8.0
 ## explicit; go 1.13
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require
 # github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635
 ## explicit
 github.com/syndtr/gocapability/capability
-# github.com/tklauser/go-sysconf v0.3.9
+# github.com/tklauser/go-sysconf v0.3.10
 ## explicit; go 1.13
 github.com/tklauser/go-sysconf
-# github.com/tklauser/numcpus v0.3.0
+# github.com/tklauser/numcpus v0.4.0
 ## explicit; go 1.11
 github.com/tklauser/numcpus
 # github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5
@@ -656,15 +670,25 @@ go.opencensus.io/trace/tracestate
 # go.uber.org/atomic v1.9.0
 ## explicit; go 1.13
 go.uber.org/atomic
-# golang.org/x/crypto v0.0.0-20220315160706-3147a52a75dd
+# golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
 ## explicit; go 1.17
+golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blake2b
+golang.org/x/crypto/blowfish
 golang.org/x/crypto/cryptobyte
 golang.org/x/crypto/cryptobyte/asn1
 golang.org/x/crypto/ed25519
 golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/scrypt
-# golang.org/x/net v0.0.0-20220225172249-27dd8689420f
+# golang.org/x/exp v0.0.0-20220921164117-439092de6870
+## explicit; go 1.18
+golang.org/x/exp/constraints
+golang.org/x/exp/maps
+golang.org/x/exp/slices
+# golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4
+## explicit; go 1.17
+golang.org/x/mod/semver
+# golang.org/x/net v0.1.0
 ## explicit; go 1.17
 golang.org/x/net/bpf
 golang.org/x/net/context
@@ -678,17 +702,18 @@ golang.org/x/net/internal/timeseries
 golang.org/x/net/ipv4
 golang.org/x/net/ipv6
 golang.org/x/net/trace
-# golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+# golang.org/x/sync v0.0.0-20220929204114-8fcdb60fdcc0
 ## explicit
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f
+# golang.org/x/sys v0.2.0
 ## explicit; go 1.17
 golang.org/x/sys/cpu
 golang.org/x/sys/execabs
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/text v0.3.7
+golang.org/x/sys/windows/registry
+# golang.org/x/text v0.4.0
 ## explicit; go 1.17
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
@@ -697,6 +722,21 @@ golang.org/x/text/unicode/norm
 # golang.org/x/time v0.0.0-20220224211638-0e9765cccd65
 ## explicit
 golang.org/x/time/rate
+# golang.org/x/tools v0.1.12
+## explicit; go 1.18
+golang.org/x/tools/go/gcexportdata
+golang.org/x/tools/go/internal/gcimporter
+golang.org/x/tools/go/internal/packagesdriver
+golang.org/x/tools/go/internal/pkgbits
+golang.org/x/tools/go/packages
+golang.org/x/tools/internal/event
+golang.org/x/tools/internal/event/core
+golang.org/x/tools/internal/event/keys
+golang.org/x/tools/internal/event/label
+golang.org/x/tools/internal/gocommand
+golang.org/x/tools/internal/packagesinternal
+golang.org/x/tools/internal/typeparams
+golang.org/x/tools/internal/typesinternal
 # google.golang.org/appengine v1.6.7
 ## explicit; go 1.11
 google.golang.org/appengine
@@ -710,11 +750,11 @@ google.golang.org/appengine/internal/datastore
 google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/modules
 google.golang.org/appengine/internal/remote_api
-# google.golang.org/genproto v0.0.0-20220314164441-57ef72a4c106
-## explicit; go 1.15
+# google.golang.org/genproto v0.0.0-20221025140454-527a21cfbd71
+## explicit; go 1.19
 google.golang.org/genproto/googleapis/rpc/status
-# google.golang.org/grpc v1.45.0
-## explicit; go 1.14
+# google.golang.org/grpc v1.50.1
+## explicit; go 1.17
 google.golang.org/grpc
 google.golang.org/grpc/attributes
 google.golang.org/grpc/backoff
@@ -723,6 +763,7 @@ google.golang.org/grpc/balancer/base
 google.golang.org/grpc/balancer/grpclb/state
 google.golang.org/grpc/balancer/roundrobin
 google.golang.org/grpc/binarylog/grpc_binarylog_v1
+google.golang.org/grpc/channelz
 google.golang.org/grpc/codes
 google.golang.org/grpc/connectivity
 google.golang.org/grpc/credentials
@@ -734,6 +775,7 @@ google.golang.org/grpc/health
 google.golang.org/grpc/health/grpc_health_v1
 google.golang.org/grpc/internal
 google.golang.org/grpc/internal/backoff
+google.golang.org/grpc/internal/balancer/gracefulswitch
 google.golang.org/grpc/internal/balancerload
 google.golang.org/grpc/internal/binarylog
 google.golang.org/grpc/internal/buffer
@@ -745,6 +787,7 @@ google.golang.org/grpc/internal/grpcrand
 google.golang.org/grpc/internal/grpcsync
 google.golang.org/grpc/internal/grpcutil
 google.golang.org/grpc/internal/metadata
+google.golang.org/grpc/internal/pretty
 google.golang.org/grpc/internal/resolver
 google.golang.org/grpc/internal/resolver/dns
 google.golang.org/grpc/internal/resolver/passthrough
@@ -765,14 +808,16 @@ google.golang.org/grpc/stats
 google.golang.org/grpc/status
 google.golang.org/grpc/tap
 google.golang.org/grpc/test/bufconn
-# google.golang.org/protobuf v1.27.1
-## explicit; go 1.9
+# google.golang.org/protobuf v1.28.1
+## explicit; go 1.11
+google.golang.org/protobuf/encoding/protojson
 google.golang.org/protobuf/encoding/prototext
 google.golang.org/protobuf/encoding/protowire
 google.golang.org/protobuf/internal/descfmt
 google.golang.org/protobuf/internal/descopts
 google.golang.org/protobuf/internal/detrand
 google.golang.org/protobuf/internal/encoding/defval
+google.golang.org/protobuf/internal/encoding/json
 google.golang.org/protobuf/internal/encoding/messageset
 google.golang.org/protobuf/internal/encoding/tag
 google.golang.org/protobuf/internal/encoding/text
@@ -811,6 +856,6 @@ gopkg.in/square/go-jose.v2/jwt
 # gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7
 ## explicit
 gopkg.in/tomb.v1
-# gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c
+# gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3

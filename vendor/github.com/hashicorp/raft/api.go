@@ -36,6 +36,10 @@ var (
 	// follower or candidate node.
 	ErrNotLeader = errors.New("node is not the leader")
 
+	// ErrNotVoter is returned when an operation can't be completed on a
+	// non-voter node.
+	ErrNotVoter = errors.New("node is not a voter")
+
 	// ErrLeadershipLost is returned when a leader fails to commit a log entry
 	// because it's been deposed in the process.
 	ErrLeadershipLost = errors.New("leadership lost while committing log")
@@ -111,8 +115,10 @@ type Raft struct {
 	lastContact     time.Time
 	lastContactLock sync.RWMutex
 
-	// Leader is the current cluster leader
-	leader     ServerAddress
+	// leaderAddr is the current cluster leader Address
+	leaderAddr ServerAddress
+	// LeaderID is the current cluster leader ID
+	leaderID   ServerID
 	leaderLock sync.RWMutex
 
 	// leaderCh is used to notify of leadership changes
@@ -195,6 +201,15 @@ type Raft struct {
 	// leadershipTransferCh is used to start a leadership transfer from outside of
 	// the main thread.
 	leadershipTransferCh chan *leadershipTransferFuture
+
+	// leaderNotifyCh is used to tell leader that config has changed
+	leaderNotifyCh chan struct{}
+
+	// followerNotifyCh is used to tell followers that config has changed
+	followerNotifyCh chan struct{}
+
+	// mainThreadSaturation measures the saturation of the main raft goroutine.
+	mainThreadSaturation *saturationMetric
 }
 
 // BootstrapCluster initializes a server's storage with the given cluster
@@ -539,6 +554,9 @@ func NewRaft(conf *Config, fsm FSM, logs LogStore, stable StableStore, snaps Sna
 		bootstrapCh:           make(chan *bootstrapFuture),
 		observers:             make(map[uint64]*Observer),
 		leadershipTransferCh:  make(chan *leadershipTransferFuture, 1),
+		leaderNotifyCh:        make(chan struct{}, 1),
+		followerNotifyCh:      make(chan struct{}, 1),
+		mainThreadSaturation:  newSaturationMetric([]string{"raft", "thread", "main", "saturation"}, 1*time.Second),
 	}
 
 	r.conf.Store(*conf)
@@ -690,6 +708,14 @@ func (r *Raft) ReloadConfig(rc ReloadableConfig) error {
 		return err
 	}
 	r.conf.Store(newCfg)
+
+	if rc.HeartbeatTimeout < oldCfg.HeartbeatTimeout {
+		// On leader, ensure replication loops running with a longer
+		// timeout than what we want now discover the change.
+		asyncNotifyCh(r.leaderNotifyCh)
+		// On follower, update current timer to use the shorter new value.
+		asyncNotifyCh(r.followerNotifyCh)
+	}
 	return nil
 }
 
@@ -732,13 +758,26 @@ func (r *Raft) BootstrapCluster(configuration Configuration) Future {
 }
 
 // Leader is used to return the current leader of the cluster.
+// Deprecated: use LeaderWithID instead
 // It may return empty string if there is no current leader
 // or the leader is unknown.
+// Deprecated: use LeaderWithID instead.
 func (r *Raft) Leader() ServerAddress {
 	r.leaderLock.RLock()
-	leader := r.leader
+	leaderAddr := r.leaderAddr
 	r.leaderLock.RUnlock()
-	return leader
+	return leaderAddr
+}
+
+// LeaderWithID is used to return the current leader address and ID of the cluster.
+// It may return empty strings if there is no current leader
+// or the leader is unknown.
+func (r *Raft) LeaderWithID() (ServerAddress, ServerID) {
+	r.leaderLock.RLock()
+	leaderAddr := r.leaderAddr
+	leaderID := r.leaderID
+	r.leaderLock.RUnlock()
+	return leaderAddr, leaderID
 }
 
 // Apply is used to apply a command to the FSM in a highly consistent

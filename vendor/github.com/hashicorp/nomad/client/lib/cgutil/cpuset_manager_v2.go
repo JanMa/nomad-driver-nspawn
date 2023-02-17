@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/go-set"
 	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/lib/cpuset"
 	"github.com/hashicorp/nomad/nomad/structs"
@@ -56,24 +57,67 @@ type cpusetManagerV2 struct {
 	isolating map[identity]cpuset.CPUSet // isolating tasks using cores from the pool + reserved cores
 }
 
-func NewCpusetManagerV2(parent string, logger hclog.Logger) CpusetManager {
+func NewCpusetManagerV2(parent string, reservable []uint16, logger hclog.Logger) CpusetManager {
+	if err := minimumRootControllers(); err != nil {
+		logger.Error("failed to enabled minimum set of cgroup controllers; disabling cpuset management", "error", err)
+		return new(NoopCpusetManager)
+	}
+
+	parentAbs := filepath.Join(CgroupRoot, parent)
+	if err := os.MkdirAll(parentAbs, 0o755); err != nil {
+		logger.Error("failed to ensure nomad parent cgroup exists; disabling cpuset management", "error", err)
+		return new(NoopCpusetManager)
+	}
+
+	if len(reservable) == 0 {
+		// read from group
+		if cpus, err := GetCPUsFromCgroup(parent); err != nil {
+			logger.Error("failed to lookup cpus from parent cgroup; disabling cpuset management", "error", err)
+			return new(NoopCpusetManager)
+		} else {
+			reservable = cpus
+		}
+	}
+
 	return &cpusetManagerV2{
+		initial:   cpuset.New(reservable...),
 		parent:    parent,
-		parentAbs: filepath.Join(CgroupRoot, parent),
+		parentAbs: parentAbs,
 		logger:    logger,
 		sharing:   make(map[identity]nothing),
 		isolating: make(map[identity]cpuset.CPUSet),
 	}
 }
 
-func (c *cpusetManagerV2) Init(cores []uint16) error {
-	c.logger.Debug("initializing with", "cores", cores)
-	if err := c.ensureParent(); err != nil {
-		c.logger.Error("failed to init cpuset manager", "err", err)
+// minimumControllers sets the minimum set of required controllers on the
+// /sys/fs/cgroup/cgroup.subtree_control file - ensuring [cpuset, cpu, io, memory, pids]
+// are enabled.
+func minimumRootControllers() error {
+	e := new(editor)
+	s, err := e.read("cgroup.subtree_control")
+	if err != nil {
 		return err
 	}
-	c.initial = cpuset.New(cores...)
-	return nil
+
+	required := set.From[string]([]string{"cpuset", "cpu", "io", "memory", "pids"})
+	enabled := set.From[string](strings.Fields(s))
+	needed := required.Difference(enabled)
+
+	if needed.Size() == 0 {
+		return nil // already sufficient
+	}
+
+	sb := new(strings.Builder)
+	for _, controller := range needed.List() {
+		sb.WriteString("+" + controller + " ")
+	}
+
+	activation := strings.TrimSpace(sb.String())
+	return e.write("cgroup.subtree_control", activation)
+}
+
+func (c *cpusetManagerV2) Init() {
+	c.logger.Debug("initializing with", "cores", c.initial)
 }
 
 func (c *cpusetManagerV2) AddAlloc(alloc *structs.Allocation) {
@@ -229,7 +273,7 @@ func (c *cpusetManagerV2) cleanup() {
 	}
 }
 
-//pathOf returns the absolute path to a task with identity id.
+// pathOf returns the absolute path to a task with identity id.
 func (c *cpusetManagerV2) pathOf(id identity) string {
 	return filepath.Join(c.parentAbs, makeScope(id))
 }
@@ -285,22 +329,6 @@ func (c *cpusetManagerV2) write(id identity, set cpuset.CPUSet) {
 	}
 }
 
-// ensureParentCgroup will create parent cgroup for the manager if it does not
-// exist yet. No PIDs are added to any cgroup yet.
-func (c *cpusetManagerV2) ensureParent() error {
-	mgr, err := fs2.NewManager(nil, c.parentAbs, rootless)
-	if err != nil {
-		return err
-	}
-
-	if err = mgr.Apply(CreationPID); err != nil {
-		return err
-	}
-
-	c.logger.Trace("establish cgroup hierarchy", "parent", c.parent)
-	return nil
-}
-
 // fromRoot returns the joined filepath of group on the CgroupRoot
 func fromRoot(group string) string {
 	return filepath.Join(CgroupRoot, group)
@@ -319,13 +347,4 @@ func getCPUsFromCgroupV2(group string) ([]uint16, error) {
 		return nil, err
 	}
 	return set.ToSlice(), nil
-}
-
-// getParentV2 returns parent if set, otherwise the default name of Nomad's
-// parent cgroup (i.e. nomad.slice).
-func getParentV2(parent string) string {
-	if parent == "" {
-		return DefaultCgroupParentV2
-	}
-	return parent
 }

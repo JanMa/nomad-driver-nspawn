@@ -2,7 +2,7 @@ package config
 
 import "fmt"
 
-// NomadConfig is the configuration for connecto to a Nomad agent.
+// NomadConfig is the configuration for connecting to a Nomad agent.
 type NomadConfig struct {
 	// Address is the URI to the Nomad agent.
 	Address *string `mapstructure:"address"`
@@ -29,6 +29,9 @@ type NomadConfig struct {
 
 	// Transport configures the low-level network connection details.
 	Transport *TransportConfig `mapstructure:"transport"`
+
+	// Retry is the configuration for specifying how to behave on failure.
+	Retry *RetryConfig `mapstructure:"retry"`
 }
 
 func DefaultNomadConfig() *NomadConfig {
@@ -54,6 +57,7 @@ func (n *NomadConfig) Copy() *NomadConfig {
 	o.AuthUsername = n.AuthUsername
 	o.AuthPassword = n.AuthPassword
 	o.Transport = n.Transport.Copy()
+	o.Retry = n.Retry.Copy()
 
 	return &o
 }
@@ -108,12 +112,15 @@ func (n *NomadConfig) Merge(o *NomadConfig) *NomadConfig {
 		r.Transport = r.Transport.Merge(o.Transport)
 	}
 
+	if o.Retry != nil {
+		r.Retry = r.Retry.Merge(o.Retry)
+	}
+
 	return r
 }
 
 // Finalize ensures there no nil pointers.
 func (n *NomadConfig) Finalize() {
-
 	if n.Address == nil {
 		n.Address = stringFromEnv([]string{"NOMAD_ADDR"}, "")
 	}
@@ -150,6 +157,11 @@ func (n *NomadConfig) Finalize() {
 		n.Transport = DefaultTransportConfig()
 	}
 	n.Transport.Finalize()
+
+	if n.Retry == nil {
+		n.Retry = DefaultRetryConfig()
+	}
+	n.Retry.Finalize()
 }
 
 func (n *NomadConfig) GoString() string {
@@ -166,6 +178,7 @@ func (n *NomadConfig) GoString() string {
 		"AuthUsername:%s, "+
 		"AuthPassword:%s, "+
 		"Transport:%#v, "+
+		"Retry:%#v, "+
 		"}",
 		StringGoString(n.Address),
 		BoolGoString(n.Enabled),
@@ -175,5 +188,6 @@ func (n *NomadConfig) GoString() string {
 		StringGoString(n.AuthUsername),
 		StringGoString(n.AuthPassword),
 		n.Transport,
+		n.Retry,
 	)
 }
