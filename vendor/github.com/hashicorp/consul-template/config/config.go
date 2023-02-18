@@ -38,10 +38,8 @@ const (
 	DefaultBlockQueryWaitTime = 60 * time.Second
 )
 
-var (
-	// homePath is the location to the user's home directory.
-	homePath, _ = homedir.Dir()
-)
+// homePath is the location to the user's home directory.
+var homePath, _ = homedir.Dir()
 
 // Config is used to configure Consul Template
 type Config struct {
@@ -175,7 +173,7 @@ func (c *Config) Copy() *Config {
 	o.BlockQueryWaitTime = c.BlockQueryWaitTime
 
 	if c.Nomad != nil {
-		o.Nomad = o.Nomad.Copy()
+		o.Nomad = c.Nomad.Copy()
 	}
 
 	return &o

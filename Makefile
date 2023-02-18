@@ -12,12 +12,12 @@ BUILDARGS := build -mod=vendor -a -v -ldflags '-extldflags "-static" -X github.c
 build: $(BINARY)
 
 docker-build: docker-image
-		sudo docker run --rm -e GO111MODULE=on -e CGO_ENABLED=0 -e GOOS=linux \
+		sudo docker run --rm -e GO111MODULE=on -e GOOS=linux \
 			-v "${PWD}":/usr/src/nomad-driver-nspawn -w /usr/src/nomad-driver-nspawn golang:1.20-alpine \
 			go $(BUILDARGS)
 
 $(BINARY): *.go nspawn/*.go | .go120
-		GO111MODULE=on CGO_ENABLED=0 GOOS=linux $(GO120) $(BUILDARGS)
+		GO111MODULE=on GOOS=linux $(GO120) $(BUILDARGS)
 
 *.go:
 

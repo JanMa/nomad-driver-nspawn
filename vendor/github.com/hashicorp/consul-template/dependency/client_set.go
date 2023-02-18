@@ -14,6 +14,7 @@ import (
 	rootcerts "github.com/hashicorp/go-rootcerts"
 	nomadapi "github.com/hashicorp/nomad/api"
 	vaultapi "github.com/hashicorp/vault/api"
+	vaultkubernetesauth "github.com/hashicorp/vault/api/auth/kubernetes"
 )
 
 // ClientSet is a collection of clients that dependencies use to communicate
@@ -93,6 +94,11 @@ type CreateVaultClientInput struct {
 	SSLCACert   string
 	SSLCAPath   string
 	ServerName  string
+
+	K8SAuthRoleName            string
+	K8SServiceAccountTokenPath string
+	K8SServiceAccountToken     string
+	K8SServiceMountPath        string
 
 	TransportCustomDialer        TransportDialer
 	TransportDialKeepAlive       time.Duration
@@ -333,31 +339,16 @@ func (c *ClientSet) CreateVaultClient(i *CreateVaultClientInput) error {
 		client.SetNamespace(i.Namespace)
 	}
 
-	// Set the token if given
-	if i.Token != "" {
-		client.SetToken(i.Token)
+	// Set token using k8s auth method.
+	if i.K8SAuthRoleName != "" && i.Token == "" {
+		err = prepareK8SServiceTokenAuth(i, client)
+		if err != nil {
+			return fmt.Errorf("client set: vault: %w", err)
+		}
 	}
 
-	// Check if we are unwrapping
-	if i.UnwrapToken {
-		secret, err := client.Logical().Unwrap(i.Token)
-		if err != nil {
-			return fmt.Errorf("client set: vault unwrap: %s", err)
-		}
-
-		if secret == nil {
-			return fmt.Errorf("client set: vault unwrap: no secret")
-		}
-
-		if secret.Auth == nil {
-			return fmt.Errorf("client set: vault unwrap: no secret auth")
-		}
-
-		if secret.Auth.ClientToken == "" {
-			return fmt.Errorf("client set: vault unwrap: no token returned")
-		}
-
-		client.SetToken(secret.Auth.ClientToken)
+	if i.Token != "" {
+		client.SetToken(i.Token)
 	}
 
 	// Save the data on ourselves
@@ -394,7 +385,7 @@ func (c *ClientSet) CreateNomadClient(i *CreateNomadClientInput) error {
 		}
 	}
 
-	// This transport will attempt to keep connections open to the Vault server.
+	// This transport will attempt to keep connections open to the Nomad server.
 	var dialer TransportDialer
 	dialer = &net.Dialer{
 		Timeout:   i.TransportDialTimeout,
@@ -520,4 +511,46 @@ func (c *ClientSet) Stop() {
 	if c.nomad != nil {
 		c.nomad.httpClient.Transport.(*http.Transport).CloseIdleConnections()
 	}
+}
+
+func prepareK8SServiceTokenAuth(
+	i *CreateVaultClientInput,
+	client *vaultapi.Client,
+) (err error) {
+	opts := make([]vaultkubernetesauth.LoginOption, 0, 2)
+
+	switch {
+	case i.K8SServiceAccountToken != "":
+		opts = append(opts, vaultkubernetesauth.WithServiceAccountToken(
+			i.K8SServiceAccountToken,
+		))
+	case i.K8SServiceAccountTokenPath != "":
+		opts = append(opts, vaultkubernetesauth.WithServiceAccountTokenPath(
+			i.K8SServiceAccountTokenPath,
+		))
+	default:
+		// The Kubernetes service account token JWT will be retrieved
+		// from /run/secrets/kubernetes.io/serviceaccount/token.
+	}
+
+	if i.K8SServiceMountPath != "" {
+		opts = append(opts, vaultkubernetesauth.WithMountPath(
+			i.K8SServiceMountPath,
+		))
+	}
+
+	k8sAuth, err := vaultkubernetesauth.NewKubernetesAuth(i.K8SAuthRoleName, opts...)
+	if err != nil {
+		return fmt.Errorf("k8s auth: new kubernetes auth: %w", err)
+	}
+
+	ctx := context.TODO()
+	sec, err := client.Auth().Login(ctx, k8sAuth)
+	if err != nil {
+		return fmt.Errorf("k8s auth: login: %w", err)
+	}
+
+	i.Token = sec.Auth.ClientToken
+
+	return nil
 }

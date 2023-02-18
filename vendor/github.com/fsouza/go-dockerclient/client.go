@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -240,19 +239,19 @@ func NewVersionedTLSClient(endpoint string, cert, key, ca, apiVersionString stri
 	var keyPEMBlock []byte
 	var caPEMCert []byte
 	if _, err := os.Stat(cert); !os.IsNotExist(err) {
-		certPEMBlock, err = ioutil.ReadFile(cert)
+		certPEMBlock, err = os.ReadFile(cert)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if _, err := os.Stat(key); !os.IsNotExist(err) {
-		keyPEMBlock, err = ioutil.ReadFile(key)
+		keyPEMBlock, err = os.ReadFile(key)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if _, err := os.Stat(ca); !os.IsNotExist(err) {
-		caPEMCert, err = ioutil.ReadFile(ca)
+		caPEMCert, err = os.ReadFile(ca)
 		if err != nil {
 			return nil, err
 		}
@@ -317,7 +316,7 @@ func NewVersionedTLSClientFromBytes(endpoint string, certPEMBlock, keyPEMBlock, 
 			return nil, err
 		}
 	}
-	tlsConfig := &tls.Config{}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if certPEMBlock != nil && keyPEMBlock != nil {
 		tlsCert, err := tls.X509KeyPair(certPEMBlock, keyPEMBlock)
 		if err != nil {
@@ -541,7 +540,16 @@ func (c *Client) streamURL(method, url string, streamOptions streamOptions) erro
 			return err
 		}
 	}
-	req, err := http.NewRequest(method, url, streamOptions.in)
+
+	// make a sub-context so that our active cancellation does not affect parent
+	ctx := streamOptions.context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	subCtx, cancelRequest := context.WithCancel(ctx)
+	defer cancelRequest()
+
+	req, err := http.NewRequestWithContext(ctx, method, url, streamOptions.in)
 	if err != nil {
 		return err
 	}
@@ -556,19 +564,11 @@ func (c *Client) streamURL(method, url string, streamOptions streamOptions) erro
 	protocol := c.endpointURL.Scheme
 	address := c.endpointURL.Path
 	if streamOptions.stdout == nil {
-		streamOptions.stdout = ioutil.Discard
+		streamOptions.stdout = io.Discard
 	}
 	if streamOptions.stderr == nil {
-		streamOptions.stderr = ioutil.Discard
+		streamOptions.stderr = io.Discard
 	}
-
-	// make a sub-context so that our active cancellation does not affect parent
-	ctx := streamOptions.context
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	subCtx, cancelRequest := context.WithCancel(ctx)
-	defer cancelRequest()
 
 	if protocol == unixProtocol || protocol == namedPipeProtocol {
 		var dial net.Conn
@@ -776,10 +776,9 @@ func (c *Client) hijack(method, path string, hijackOptions hijackOptions) (Close
 	errs := make(chan error, 1)
 	quit := make(chan struct{})
 	go func() {
-		//nolint:staticcheck
+		//lint:ignore SA1019 the alternative doesn't quite work, so keep using the deprecated thing.
 		clientconn := httputil.NewClientConn(dial, nil)
 		defer clientconn.Close()
-		//nolint:bodyclose
 		clientconn.Do(req)
 		if hijackOptions.success != nil {
 			hijackOptions.success <- struct{}{}
@@ -798,10 +797,10 @@ func (c *Client) hijack(method, path string, hijackOptions hijackOptions) (Close
 			// will "hang" until the container terminates, even though you're not reading
 			// stdout/stderr
 			if hijackOptions.stdout == nil {
-				hijackOptions.stdout = ioutil.Discard
+				hijackOptions.stdout = io.Discard
 			}
 			if hijackOptions.stderr == nil {
-				hijackOptions.stderr = ioutil.Discard
+				hijackOptions.stderr = io.Discard
 			}
 
 			go func() {
@@ -1024,7 +1023,7 @@ func newError(resp *http.Response) *Error {
 		Message string `json:"message"`
 	}
 	defer resp.Body.Close()
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return &Error{Status: resp.StatusCode, Message: fmt.Sprintf("cannot read body, err: %v", err)}
 	}
@@ -1057,7 +1056,8 @@ func parseEndpoint(endpoint string, tls bool) (*url.URL, error) {
 	case "http", "https", "tcp":
 		_, port, err := net.SplitHostPort(u.Host)
 		if err != nil {
-			if e, ok := err.(*net.AddrError); ok {
+			var e *net.AddrError
+			if errors.As(err, &e) {
 				if e.Err == "missing port in address" {
 					return u, nil
 				}

@@ -60,7 +60,6 @@ type ProxyConfig struct {
 	HTTPSProxy string `json:"httpsProxy,omitempty"`
 	NoProxy    string `json:"noProxy,omitempty"`
 	FTPProxy   string `json:"ftpProxy,omitempty"`
-	AllProxy   string `json:"allProxy,omitempty"`
 }
 
 // KubernetesConfig contains Kubernetes orchestrator settings
@@ -120,7 +119,7 @@ func (configFile *ConfigFile) LegacyLoadFromReader(configData io.Reader) error {
 // LoadFromReader reads the configuration data given and sets up the auth config
 // information with given directory and populates the receiver object
 func (configFile *ConfigFile) LoadFromReader(configData io.Reader) error {
-	if err := json.NewDecoder(configData).Decode(&configFile); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(configData).Decode(configFile); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	var err error
@@ -245,7 +244,6 @@ func (configFile *ConfigFile) ParseProxyConfig(host string, runOpts map[string]*
 		"HTTPS_PROXY": &config.HTTPSProxy,
 		"NO_PROXY":    &config.NoProxy,
 		"FTP_PROXY":   &config.FTPProxy,
-		"ALL_PROXY":   &config.AllProxy,
 	}
 	m := runOpts
 	if m == nil {

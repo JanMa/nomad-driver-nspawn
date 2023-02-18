@@ -13,12 +13,14 @@ import (
 	"github.com/hashicorp/consul-template/config"
 	"github.com/hashicorp/nomad/client/lib/cgutil"
 	"github.com/hashicorp/nomad/command/agent/host"
+	"golang.org/x/exp/maps"
+	"golang.org/x/exp/slices"
 
 	log "github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/client/state"
-	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/helper/bufconndialer"
 	"github.com/hashicorp/nomad/helper/pluginutils/loader"
+	"github.com/hashicorp/nomad/helper/pointer"
 	"github.com/hashicorp/nomad/nomad/structs"
 	structsc "github.com/hashicorp/nomad/nomad/structs/config"
 	"github.com/hashicorp/nomad/plugins/base"
@@ -64,7 +66,7 @@ var (
 		"/run/systemd/resolve": "/run/systemd/resolve",
 	}
 
-	DefaultTemplateMaxStale = 5 * time.Second
+	DefaultTemplateMaxStale = 87600 * time.Hour
 
 	DefaultTemplateFunctionDenylist = []string{"plugin", "writeToFile"}
 )
@@ -215,6 +217,10 @@ type Config struct {
 	// ACLPolicyTTL is how long we cache policy values for
 	ACLPolicyTTL time.Duration
 
+	// ACLRoleTTL is how long we cache ACL role value for within each Nomad
+	// client.
+	ACLRoleTTL time.Duration
+
 	// DisableRemoteExec disables remote exec targeting tasks on this client
 	DisableRemoteExec bool
 
@@ -358,6 +364,13 @@ type ClientTemplateConfig struct {
 	// to wait for the cluster to become available, as is customary in distributed
 	// systems.
 	VaultRetry *RetryConfig `hcl:"vault_retry,optional"`
+
+	// This controls the retry behavior when an error is returned from Nomad.
+	// Consul Template is highly fault tolerant, meaning it does not exit in the
+	// face of failure. Instead, it uses exponential back-off and retry functions
+	// to wait for the cluster to become available, as is customary in distributed
+	// systems.
+	NomadRetry *RetryConfig `hcl:"nomad_retry,optional"`
 }
 
 // Copy returns a deep copy of a ClientTemplateConfig
@@ -370,7 +383,7 @@ func (c *ClientTemplateConfig) Copy() *ClientTemplateConfig {
 	*nc = *c
 
 	if len(c.FunctionDenylist) > 0 {
-		nc.FunctionDenylist = helper.CopySliceString(nc.FunctionDenylist)
+		nc.FunctionDenylist = slices.Clone(nc.FunctionDenylist)
 	} else if c.FunctionDenylist != nil {
 		// Explicitly no functions denied (which is different than nil)
 		nc.FunctionDenylist = []string{}
@@ -396,6 +409,10 @@ func (c *ClientTemplateConfig) Copy() *ClientTemplateConfig {
 		nc.VaultRetry = c.VaultRetry.Copy()
 	}
 
+	if c.NomadRetry != nil {
+		nc.NomadRetry = c.NomadRetry.Copy()
+	}
+
 	return nc
 }
 
@@ -413,7 +430,8 @@ func (c *ClientTemplateConfig) IsEmpty() bool {
 		c.MaxStaleHCL == "" &&
 		c.Wait.IsEmpty() &&
 		c.ConsulRetry.IsEmpty() &&
-		c.VaultRetry.IsEmpty()
+		c.VaultRetry.IsEmpty() &&
+		c.NomadRetry.IsEmpty()
 }
 
 // WaitConfig is mirrored from templateconfig.WaitConfig because we need to handle
@@ -524,7 +542,7 @@ func (wc *WaitConfig) ToConsulTemplate() (*config.WaitConfig, error) {
 		return nil, err
 	}
 
-	result := &config.WaitConfig{Enabled: helper.BoolToPtr(true)}
+	result := &config.WaitConfig{Enabled: pointer.Of(true)}
 
 	if wc.Min != nil {
 		result.Min = wc.Min
@@ -667,7 +685,7 @@ func (rc *RetryConfig) ToConsulTemplate() (*config.RetryConfig, error) {
 		return nil, err
 	}
 
-	result := &config.RetryConfig{Enabled: helper.BoolToPtr(true)}
+	result := &config.RetryConfig{Enabled: pointer.Of(true)}
 
 	if rc.Attempts != nil {
 		result.Attempts = rc.Attempts
@@ -685,21 +703,21 @@ func (rc *RetryConfig) ToConsulTemplate() (*config.RetryConfig, error) {
 }
 
 func (c *Config) Copy() *Config {
-	nc := new(Config)
-	*nc = *c
+	if c == nil {
+		return nil
+	}
+
+	nc := *c
 	nc.Node = nc.Node.Copy()
-	nc.Servers = helper.CopySliceString(nc.Servers)
-	nc.Options = helper.CopyMapStringString(nc.Options)
+	nc.Servers = slices.Clone(nc.Servers)
+	nc.Options = maps.Clone(nc.Options)
 	nc.HostVolumes = structs.CopyMapStringClientHostVolumeConfig(nc.HostVolumes)
 	nc.ConsulConfig = c.ConsulConfig.Copy()
 	nc.VaultConfig = c.VaultConfig.Copy()
 	nc.TemplateConfig = c.TemplateConfig.Copy()
-	if c.ReservableCores != nil {
-		nc.ReservableCores = make([]uint16, len(c.ReservableCores))
-		copy(nc.ReservableCores, c.ReservableCores)
-	}
+	nc.ReservableCores = slices.Clone(c.ReservableCores)
 	nc.Artifact = c.Artifact.Copy()
-	return nc
+	return &nc
 }
 
 // DefaultConfig returns the default configuration
@@ -721,8 +739,23 @@ func DefaultConfig() *Config {
 		NoHostUUID:              true,
 		DisableRemoteExec:       false,
 		TemplateConfig: &ClientTemplateConfig{
-			FunctionDenylist: DefaultTemplateFunctionDenylist,
-			DisableSandbox:   false,
+			FunctionDenylist:   DefaultTemplateFunctionDenylist,
+			DisableSandbox:     false,
+			BlockQueryWaitTime: pointer.Of(5 * time.Minute),         // match Consul default
+			MaxStale:           pointer.Of(DefaultTemplateMaxStale), // match Consul default
+			Wait: &WaitConfig{
+				Min: pointer.Of(5 * time.Second),
+				Max: pointer.Of(4 * time.Minute),
+			},
+			ConsulRetry: &RetryConfig{
+				Attempts: pointer.Of(0), // unlimited
+			},
+			VaultRetry: &RetryConfig{
+				Attempts: pointer.Of(0), // unlimited
+			},
+			NomadRetry: &RetryConfig{
+				Attempts: pointer.Of(0), // unlimited
+			},
 		},
 		RPCHoldTimeout:     5 * time.Second,
 		CNIPath:            "/opt/cni/bin",

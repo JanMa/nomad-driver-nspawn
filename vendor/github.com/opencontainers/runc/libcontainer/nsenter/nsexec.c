@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <limits.h>
 #include <sched.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -39,13 +40,9 @@ enum sync_t {
 	SYNC_RECVPID_ACK = 0x43,	/* PID was correctly received by parent. */
 	SYNC_GRANDCHILD = 0x44,	/* The grandchild is ready to run. */
 	SYNC_CHILD_FINISH = 0x45,	/* The child or grandchild has finished. */
+	SYNC_MOUNTSOURCES_PLS = 0x46,	/* Tell parent to send mount sources by SCM_RIGHTS. */
+	SYNC_MOUNTSOURCES_ACK = 0x47,	/* All mount sources have been sent. */
 };
-
-/*
- * Synchronisation value for cgroup namespace setup.
- * The same constant is defined in process_linux.go as "createCgroupns".
- */
-#define CREATECGROUPNS 0x80
 
 #define STAGE_SETUP  -1
 /* longjmp() arguments. */
@@ -93,16 +90,27 @@ struct nlconfig_t {
 	size_t uidmappath_len;
 	char *gidmappath;
 	size_t gidmappath_len;
+
+	/* Mount sources opened outside the container userns. */
+	char *mountsources;
+	size_t mountsources_len;
 };
 
-#define PANIC   "panic"
-#define FATAL   "fatal"
-#define ERROR   "error"
-#define WARNING "warning"
-#define INFO    "info"
-#define DEBUG   "debug"
+/*
+ * Log levels are the same as in logrus.
+ */
+#define PANIC   0
+#define FATAL   1
+#define ERROR   2
+#define WARNING 3
+#define INFO    4
+#define DEBUG   5
+#define TRACE   6
+
+static const char *level_str[] = { "panic", "fatal", "error", "warning", "info", "debug", "trace" };
 
 static int logfd = -1;
+static int loglevel = DEBUG;
 
 /*
  * List of netlink message types sent to us as part of bootstrapping the init.
@@ -118,6 +126,7 @@ static int logfd = -1;
 #define ROOTLESS_EUID_ATTR	27287
 #define UIDMAPPATH_ATTR		27288
 #define GIDMAPPATH_ATTR		27289
+#define MOUNT_SOURCES_ATTR	27290
 
 /*
  * Use the raw syscall for versions of glibc which don't include a function for
@@ -140,20 +149,22 @@ int setns(int fd, int nstype)
 }
 #endif
 
-static void write_log(const char *level, const char *format, ...)
+static void write_log(int level, const char *format, ...)
 {
 	char *message = NULL, *stage = NULL, *json = NULL;
 	va_list args;
 	int ret;
 
-	if (logfd < 0 || level == NULL)
+	if (logfd < 0 || level > loglevel)
 		goto out;
 
 	va_start(args, format);
 	ret = vasprintf(&message, format, args);
 	va_end(args);
-	if (ret < 0)
+	if (ret < 0) {
+		message = NULL;
 		goto out;
+	}
 
 	message = escape_json_string(message);
 
@@ -161,10 +172,13 @@ static void write_log(const char *level, const char *format, ...)
 		stage = strdup("nsexec");
 	else
 		ret = asprintf(&stage, "nsexec-%d", current_stage);
-	if (ret < 0)
+	if (ret < 0) {
+		stage = NULL;
 		goto out;
+	}
 
-	ret = asprintf(&json, "{\"level\":\"%s\", \"msg\": \"%s[%d]: %s\"}\n", level, stage, getpid(), message);
+	ret = asprintf(&json, "{\"level\":\"%s\", \"msg\": \"%s[%d]: %s\"}\n",
+		       level_str[level], stage, getpid(), message);
 	if (ret < 0) {
 		json = NULL;
 		goto out;
@@ -184,10 +198,14 @@ out:
 /* XXX: This is ugly. */
 static int syncfd = -1;
 
-#define bail(fmt, ...)                                       \
-	do {                                                       \
-		write_log(FATAL, fmt ": %m", ##__VA_ARGS__); \
-		exit(1);                                                 \
+#define bail(fmt, ...)                                               \
+	do {                                                         \
+		if (logfd < 0)                                       \
+			fprintf(stderr, "FATAL: " fmt ": %m\n",      \
+				##__VA_ARGS__);                      \
+		else                                                 \
+			write_log(FATAL, fmt ": %m", ##__VA_ARGS__); \
+		exit(1);                                             \
 	} while(0)
 
 static int write_file(char *data, size_t data_len, char *pathfmt, ...)
@@ -320,7 +338,7 @@ static int try_mapping_tool(const char *app, int pid, char *map, size_t map_len)
 
 static void update_uidmap(const char *path, int pid, char *map, size_t map_len)
 {
-	if (map == NULL || map_len <= 0)
+	if (map == NULL || map_len == 0)
 		return;
 
 	write_log(DEBUG, "update /proc/%d/uid_map to '%s'", pid, map);
@@ -335,7 +353,7 @@ static void update_uidmap(const char *path, int pid, char *map, size_t map_len)
 
 static void update_gidmap(const char *path, int pid, char *map, size_t map_len)
 {
-	if (map == NULL || map_len <= 0)
+	if (map == NULL || map_len == 0)
 		return;
 
 	write_log(DEBUG, "update /proc/%d/gid_map to '%s'", pid, map);
@@ -350,7 +368,7 @@ static void update_gidmap(const char *path, int pid, char *map, size_t map_len)
 
 static void update_oom_score_adj(char *data, size_t len)
 {
-	if (data == NULL || len <= 0)
+	if (data == NULL || len == 0)
 		return;
 
 	write_log(DEBUG, "update /proc/self/oom_score_adj to '%s'", data);
@@ -378,41 +396,53 @@ static int clone_parent(jmp_buf *env, int jmpval)
 }
 
 /*
- * Gets the init pipe fd from the environment, which is used to read the
- * bootstrap data and tell the parent what the new pid is after we finish
- * setting up the environment.
+ * Returns an environment variable value as a non-negative integer, or -ENOENT
+ * if the variable was not found or has an empty value.
+ *
+ * If the value can not be converted to an integer, or the result is out of
+ * range, the function bails out.
  */
-static int initpipe(void)
+static int getenv_int(const char *name)
 {
-	int pipenum;
-	char *initpipe, *endptr;
+	char *val, *endptr;
+	int ret;
 
-	initpipe = getenv("_LIBCONTAINER_INITPIPE");
-	if (initpipe == NULL || *initpipe == '\0')
-		return -1;
+	val = getenv(name);
+	/* Treat empty value as unset variable. */
+	if (val == NULL || *val == '\0')
+		return -ENOENT;
 
-	pipenum = strtol(initpipe, &endptr, 10);
-	if (*endptr != '\0')
-		bail("unable to parse _LIBCONTAINER_INITPIPE");
+	ret = strtol(val, &endptr, 10);
+	if (val == endptr || *endptr != '\0')
+		bail("unable to parse %s=%s", name, val);
+	/*
+	 * Sanity check: this must be a non-negative number.
+	 */
+	if (ret < 0)
+		bail("bad value for %s=%s (%d)", name, val, ret);
 
-	return pipenum;
+	return ret;
 }
 
+/*
+ * Sets up logging by getting log fd and log level from the environment,
+ * if available.
+ */
 static void setup_logpipe(void)
 {
-	char *logpipe, *endptr;
+	int i;
 
-	logpipe = getenv("_LIBCONTAINER_LOGPIPE");
-	if (logpipe == NULL || *logpipe == '\0') {
+	i = getenv_int("_LIBCONTAINER_LOGPIPE");
+	if (i < 0) {
+		/* We are not runc init, or log pipe was not provided. */
 		return;
 	}
+	logfd = i;
 
-	logfd = strtol(logpipe, &endptr, 10);
-	if (logpipe == endptr || *endptr != '\0') {
-		fprintf(stderr, "unable to parse _LIBCONTAINER_LOGPIPE, value: %s\n", logpipe);
-		/* It is too early to use bail */
-		exit(1);
-	}
+	i = getenv_int("_LIBCONTAINER_LOGLEVEL");
+	if (i < 0)
+		return;
+	loglevel = i;
 }
 
 /* Returns the clone(2) flag for a namespace, given the name of a namespace. */
@@ -518,6 +548,10 @@ static void nl_parse(int fd, struct nlconfig_t *config)
 		case SETGROUP_ATTR:
 			config->is_setgroup = readint8(current);
 			break;
+		case MOUNT_SOURCES_ATTR:
+			config->mountsources = current;
+			config->mountsources_len = payload_len;
+			break;
 		default:
 			bail("unknown netlink message type %d", nlattr->nla_type);
 		}
@@ -609,6 +643,193 @@ static inline int sane_kill(pid_t pid, int signum)
 		return 0;
 }
 
+void receive_fd(int sockfd, int new_fd)
+{
+	int bytes_read;
+	struct msghdr msg = { };
+	struct cmsghdr *cmsg;
+	struct iovec iov = { };
+	char null_byte = '\0';
+	int ret;
+	int fd_count;
+	int *fd_payload;
+
+	iov.iov_base = &null_byte;
+	iov.iov_len = 1;
+
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+
+	msg.msg_controllen = CMSG_SPACE(sizeof(int));
+	msg.msg_control = malloc(msg.msg_controllen);
+	if (msg.msg_control == NULL) {
+		bail("Can't allocate memory to receive fd.");
+	}
+
+	memset(msg.msg_control, 0, msg.msg_controllen);
+
+	bytes_read = recvmsg(sockfd, &msg, 0);
+	if (bytes_read != 1)
+		bail("failed to receive fd from unix socket %d", sockfd);
+	if (msg.msg_flags & MSG_CTRUNC)
+		bail("received truncated control message from unix socket %d", sockfd);
+
+	cmsg = CMSG_FIRSTHDR(&msg);
+	if (!cmsg)
+		bail("received message from unix socket %d without control message", sockfd);
+
+	if (cmsg->cmsg_level != SOL_SOCKET)
+		bail("received unknown control message from unix socket %d: cmsg_level=%d", sockfd, cmsg->cmsg_level);
+
+	if (cmsg->cmsg_type != SCM_RIGHTS)
+		bail("received unknown control message from unix socket %d: cmsg_type=%d", sockfd, cmsg->cmsg_type);
+
+	fd_count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+	if (fd_count != 1)
+		bail("received control message from unix socket %d with too many fds: %d", sockfd, fd_count);
+
+	fd_payload = (int *)CMSG_DATA(cmsg);
+	ret = dup3(*fd_payload, new_fd, O_CLOEXEC);
+	if (ret < 0)
+		bail("cannot dup3 fd %d to %d", *fd_payload, new_fd);
+
+	free(msg.msg_control);
+
+	ret = close(*fd_payload);
+	if (ret < 0)
+		bail("cannot close fd %d", *fd_payload);
+}
+
+void send_fd(int sockfd, int fd)
+{
+	int bytes_written;
+	struct msghdr msg = { };
+	struct cmsghdr *cmsg;
+	struct iovec iov[1] = { };
+	char null_byte = '\0';
+
+	iov[0].iov_base = &null_byte;
+	iov[0].iov_len = 1;
+
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+
+	/* We send only one fd as specified by cmsg->cmsg_len below, even
+	 * though msg.msg_controllen might have more space due to alignment. */
+	msg.msg_controllen = CMSG_SPACE(sizeof(int));
+	msg.msg_control = malloc(msg.msg_controllen);
+	if (msg.msg_control == NULL) {
+		bail("Can't allocate memory to send fd.");
+	}
+
+	memset(msg.msg_control, 0, msg.msg_controllen);
+
+	cmsg = CMSG_FIRSTHDR(&msg);
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_RIGHTS;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+	memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
+
+	bytes_written = sendmsg(sockfd, &msg, 0);
+
+	free(msg.msg_control);
+
+	if (bytes_written != 1)
+		bail("failed to send fd %d via unix socket %d", fd, sockfd);
+}
+
+void receive_mountsources(int sockfd)
+{
+	char *mount_fds, *endp;
+	long new_fd;
+
+	// This env var must be a json array of ints.
+	mount_fds = getenv("_LIBCONTAINER_MOUNT_FDS");
+
+	if (mount_fds[0] != '[') {
+		bail("malformed _LIBCONTAINER_MOUNT_FDS env var: missing '['");
+	}
+	mount_fds++;
+
+	for (endp = mount_fds; *endp != ']'; mount_fds = endp + 1) {
+		new_fd = strtol(mount_fds, &endp, 10);
+		if (endp == mount_fds) {
+			bail("malformed _LIBCONTAINER_MOUNT_FDS env var: not a number");
+		}
+		if (*endp == '\0') {
+			bail("malformed _LIBCONTAINER_MOUNT_FDS env var: missing ]");
+		}
+		// The list contains -1 when no fd is needed. Ignore them.
+		if (new_fd == -1) {
+			continue;
+		}
+
+		if (new_fd == LONG_MAX || new_fd < 0 || new_fd > INT_MAX) {
+			bail("malformed _LIBCONTAINER_MOUNT_FDS env var: fds out of range");
+		}
+
+		receive_fd(sockfd, new_fd);
+	}
+}
+
+void send_mountsources(int sockfd, pid_t child, char *mountsources, size_t mountsources_len)
+{
+	char proc_path[PATH_MAX];
+	int host_mntns_fd;
+	int container_mntns_fd;
+	int fd;
+	int ret;
+
+	// container_linux.go shouldSendMountSources() decides if mount sources
+	// should be pre-opened (O_PATH) and passed via SCM_RIGHTS
+	if (mountsources == NULL)
+		return;
+
+	host_mntns_fd = open("/proc/self/ns/mnt", O_RDONLY | O_CLOEXEC);
+	if (host_mntns_fd == -1)
+		bail("failed to get current mount namespace");
+
+	if (snprintf(proc_path, PATH_MAX, "/proc/%d/ns/mnt", child) < 0)
+		bail("failed to get mount namespace path");
+
+	container_mntns_fd = open(proc_path, O_RDONLY | O_CLOEXEC);
+	if (container_mntns_fd == -1)
+		bail("failed to get container mount namespace");
+
+	if (setns(container_mntns_fd, CLONE_NEWNS) < 0)
+		bail("failed to setns to container mntns");
+
+	char *mountsources_end = mountsources + mountsources_len;
+	while (mountsources < mountsources_end) {
+		if (mountsources[0] == '\0') {
+			mountsources++;
+			continue;
+		}
+
+		fd = open(mountsources, O_PATH | O_CLOEXEC);
+		if (fd < 0)
+			bail("failed to open mount source %s", mountsources);
+
+		send_fd(sockfd, fd);
+
+		ret = close(fd);
+		if (ret != 0)
+			bail("failed to close mount source fd %d", fd);
+
+		mountsources += strlen(mountsources) + 1;
+	}
+
+	if (setns(host_mntns_fd, CLONE_NEWNS) < 0)
+		bail("failed to setns to host mntns");
+
+	ret = close(host_mntns_fd);
+	if (ret != 0)
+		bail("failed to close host mount namespace fd %d", host_mntns_fd);
+	ret = close(container_mntns_fd);
+	if (ret != 0)
+		bail("failed to close container mount namespace fd %d", container_mntns_fd);
+}
+
 void nsexec(void)
 {
 	int pipenum;
@@ -623,12 +844,15 @@ void nsexec(void)
 	setup_logpipe();
 
 	/*
-	 * If we don't have an init pipe, just return to the go routine.
-	 * We'll only get an init pipe for start or exec.
+	 * Get the init pipe fd from the environment. The init pipe is used to
+	 * read the bootstrap data and tell the parent what the new pids are
+	 * after the setup is done.
 	 */
-	pipenum = initpipe();
-	if (pipenum == -1)
+	pipenum = getenv_int("_LIBCONTAINER_INITPIPE");
+	if (pipenum < 0) {
+		/* We are not a runc init. Just return to go runtime. */
 		return;
+	}
 
 	/*
 	 * We need to re-exec if we are not in a cloned binary. This is necessary
@@ -759,7 +983,8 @@ void nsexec(void)
 				bail("unable to spawn stage-1");
 
 			syncfd = sync_child_pipe[1];
-			close(sync_child_pipe[0]);
+			if (close(sync_child_pipe[0]) < 0)
+				bail("failed to close sync_child_pipe[0] fd");
 
 			/*
 			 * State machine for synchronisation with the children. We only
@@ -837,6 +1062,16 @@ void nsexec(void)
 						bail("failed to sync with runc: write(pid-JSON)");
 					}
 					break;
+				case SYNC_MOUNTSOURCES_PLS:
+					send_mountsources(syncfd, stage1_pid, config.mountsources,
+							  config.mountsources_len);
+
+					s = SYNC_MOUNTSOURCES_ACK;
+					if (write(syncfd, &s, sizeof(s)) != sizeof(s)) {
+						sane_kill(stage1_pid, SIGKILL);
+						bail("failed to sync with child: write(SYNC_MOUNTSOURCES_ACK)");
+					}
+					break;
 				case SYNC_CHILD_FINISH:
 					write_log(DEBUG, "stage-1 complete");
 					stage1_complete = true;
@@ -849,7 +1084,9 @@ void nsexec(void)
 
 			/* Now sync with grandchild. */
 			syncfd = sync_grandchild_pipe[1];
-			close(sync_grandchild_pipe[0]);
+			if (close(sync_grandchild_pipe[0]) < 0)
+				bail("failed to close sync_grandchild_pipe[0] fd");
+
 			write_log(DEBUG, "-> stage-2 synchronisation loop");
 			stage2_complete = false;
 			while (!stage2_complete) {
@@ -895,7 +1132,8 @@ void nsexec(void)
 
 			/* We're in a child and thus need to tell the parent if we die. */
 			syncfd = sync_child_pipe[0];
-			close(sync_child_pipe[1]);
+			if (close(sync_child_pipe[1]) < 0)
+				bail("failed to close sync_child_pipe[1] fd");
 
 			/* For debugging. */
 			prctl(PR_SET_NAME, (unsigned long)"runc:[1:CHILD]", 0, 0, 0);
@@ -988,6 +1226,28 @@ void nsexec(void)
 			if (unshare(config.cloneflags & ~CLONE_NEWCGROUP) < 0)
 				bail("failed to unshare remaining namespaces (except cgroupns)");
 
+			/* Ask our parent to send the mount sources fds. */
+			if (config.mountsources) {
+				s = SYNC_MOUNTSOURCES_PLS;
+				if (write(syncfd, &s, sizeof(s)) != sizeof(s)) {
+					sane_kill(stage2_pid, SIGKILL);
+					bail("failed to sync with parent: write(SYNC_MOUNTSOURCES_PLS)");
+				}
+
+				/* Receive and install all mount sources fds. */
+				receive_mountsources(syncfd);
+
+				/* Parent finished to send the mount sources fds. */
+				if (read(syncfd, &s, sizeof(s)) != sizeof(s)) {
+					sane_kill(stage2_pid, SIGKILL);
+					bail("failed to sync with parent: read(SYNC_MOUNTSOURCES_ACK)");
+				}
+				if (s != SYNC_MOUNTSOURCES_ACK) {
+					sane_kill(stage2_pid, SIGKILL);
+					bail("failed to sync with parent: SYNC_MOUNTSOURCES_ACK: got %u", s);
+				}
+			}
+
 			/*
 			 * TODO: What about non-namespace clone flags that we're dropping here?
 			 *
@@ -1052,9 +1312,11 @@ void nsexec(void)
 
 			/* We're in a child and thus need to tell the parent if we die. */
 			syncfd = sync_grandchild_pipe[0];
-			close(sync_grandchild_pipe[1]);
-			close(sync_child_pipe[0]);
-			close(sync_child_pipe[1]);
+			if (close(sync_grandchild_pipe[1]) < 0)
+				bail("failed to close sync_grandchild_pipe[1] fd");
+
+			if (close(sync_child_pipe[0]) < 0)
+				bail("failed to close sync_child_pipe[0] fd");
 
 			/* For debugging. */
 			prctl(PR_SET_NAME, (unsigned long)"runc:[2:INIT]", 0, 0, 0);
@@ -1079,33 +1341,19 @@ void nsexec(void)
 					bail("setgroups failed");
 			}
 
-			/*
-			 * Wait until our topmost parent has finished cgroup setup in
-			 * p.manager.Apply().
-			 *
-			 * TODO(cyphar): Check if this code is actually needed because we
-			 *               should be in the cgroup even from stage-0, so
-			 *               waiting until now might not make sense.
-			 */
 			if (config.cloneflags & CLONE_NEWCGROUP) {
-				uint8_t value;
-				if (read(pipenum, &value, sizeof(value)) != sizeof(value))
-					bail("read synchronisation value failed");
-				if (value == CREATECGROUPNS) {
-					write_log(DEBUG, "unshare cgroup namespace");
-					if (unshare(CLONE_NEWCGROUP) < 0)
-						bail("failed to unshare cgroup namespace");
-				} else
-					bail("received unknown synchronisation value");
+				if (unshare(CLONE_NEWCGROUP) < 0)
+					bail("failed to unshare cgroup namespace");
 			}
 
 			write_log(DEBUG, "signal completion to stage-0");
 			s = SYNC_CHILD_FINISH;
 			if (write(syncfd, &s, sizeof(s)) != sizeof(s))
-				bail("failed to sync with patent: write(SYNC_CHILD_FINISH)");
+				bail("failed to sync with parent: write(SYNC_CHILD_FINISH)");
 
 			/* Close sync pipes. */
-			close(sync_grandchild_pipe[0]);
+			if (close(sync_grandchild_pipe[0]) < 0)
+				bail("failed to close sync_grandchild_pipe[0] fd");
 
 			/* Free netlink data. */
 			nl_free(&config);

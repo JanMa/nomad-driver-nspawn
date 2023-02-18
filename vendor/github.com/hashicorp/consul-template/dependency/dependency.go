@@ -12,15 +12,20 @@ import (
 )
 
 const (
-	dcRe          = `(@(?P<dc>[[:word:]\.\-\_]+))?`
-	keyRe         = `/?(?P<key>[^@]+)`
-	filterRe      = `(\|(?P<filter>[[:word:]\,]+))?`
-	serviceNameRe = `(?P<name>[[:word:]\-\_]+)`
-	nodeNameRe    = `(?P<name>[[:word:]\.\-\_]+)`
-	nearRe        = `(~(?P<near>[[:word:]\.\-\_]+))?`
-	prefixRe      = `/?(?P<prefix>[^@]+)`
-	tagRe         = `((?P<tag>[[:word:]=:\.\-\_]+)\.)?`
-	regionRe      = `(@(?P<region>[[:word:]\.\-\_]+))?`
+	dcRe           = `(@(?P<dc>[[:word:]\.\-\_]+))?`
+	keyRe          = `/?(?P<key>[^@]+)`
+	filterRe       = `(\|(?P<filter>[[:word:]\,]+))?`
+	serviceNameRe  = `(?P<name>[[:word:]\-\_]+)`
+	nodeNameRe     = `(?P<name>[[:word:]\.\-\_]+)`
+	nearRe         = `(~(?P<near>[[:word:]\.\-\_]+))?`
+	prefixRe       = `/?(?P<prefix>[^@]+)`
+	tagRe          = `((?P<tag>[[:word:]=:\.\-\_]+)\.)?`
+	regionRe       = `(@(?P<region>[[:word:]\.\-\_]+))?`
+	nvPathRe       = `/?(?P<path>[^@]+)`
+	nvNamespaceRe  = `(@(?P<namespace>[[:word:]\-\_]+))?`
+	nvListPrefixRe = `/?(?P<prefix>[^@]*)`
+	nvListNSRe     = `(@(?P<namespace>([[:word:]\-\_]+|\*)))?`
+	nvRegionRe     = `(\.(?P<region>[[:word:]\-\_]+))?`
 )
 
 type Type int
@@ -53,6 +58,7 @@ type QueryOptions struct {
 	Datacenter        string
 	Region            string
 	Near              string
+	Choose            string
 	RequireConsistent bool
 	VaultGrace        time.Duration
 	WaitIndex         uint64
@@ -92,6 +98,10 @@ func (q *QueryOptions) Merge(o *QueryOptions) *QueryOptions {
 		r.Near = o.Near
 	}
 
+	if o.Choose != "" {
+		r.Choose = o.Choose
+	}
+
 	if o.RequireConsistent != false {
 		r.RequireConsistent = o.RequireConsistent
 	}
@@ -119,9 +129,16 @@ func (q *QueryOptions) ToConsulOpts() *consulapi.QueryOptions {
 }
 
 func (q *QueryOptions) ToNomadOpts() *nomadapi.QueryOptions {
+	var params map[string]string
+	if q.Choose != "" {
+		params = map[string]string{
+			"choose": q.Choose,
+		}
+	}
 	return &nomadapi.QueryOptions{
 		AllowStale: q.AllowStale,
 		Region:     q.Region,
+		Params:     params,
 		WaitIndex:  q.WaitIndex,
 		WaitTime:   q.WaitTime,
 	}
@@ -144,6 +161,10 @@ func (q *QueryOptions) String() string {
 
 	if q.Near != "" {
 		u.Add("near", q.Near)
+	}
+
+	if q.Choose != "" {
+		u.Add("choose", q.Choose)
 	}
 
 	if q.RequireConsistent {
