@@ -10,7 +10,7 @@ Nomad task.
 ## Client requirements
 
 * [Nomad](https://nomadproject.io) 1.3.0+ running as `root`
-* [Go](https://golang.org/doc/install) 1.17
+* [Go](https://golang.org/doc/install) 1.20
 * Linux
 * [`systemd-nspawn`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html)
   installed
