@@ -101,6 +101,7 @@ var (
 					hclspec.NewLiteral(`"no"`),
 				),
 			})),
+		"cleanup_after_stop": hclspec.NewAttr("cleanup_after_stop", "bool", false),
 		// "machine":           hclspec.NewAttr("machine", "string", false),
 		"pivot_root":        hclspec.NewAttr("pivot_root", "string", false),
 		"resolv_conf":       hclspec.NewAttr("resolv_conf", "string", false),
@@ -768,6 +769,16 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 
 	if !handle.pluginClient.Exited() {
 		handle.pluginClient.Kill()
+	}
+
+	var driverConfig MachineConfig
+	if err := handle.taskConfig.DecodeDriverConfig(&driverConfig); err != nil {
+		return fmt.Errorf("failed to decode driver config: %v", err)
+	}
+	if driverConfig.CleanupAfterStop {
+		if err := RemoveImage(handle.machine.RootDirectory); err != nil {
+			return fmt.Errorf("could not remove image: %w", err)
+		}
 	}
 
 	d.tasks.Delete(taskID)

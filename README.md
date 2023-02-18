@@ -103,6 +103,7 @@ should cover a broad range of use cases:
   directory. **This option is mandatory**.
 * `image_download` - (Optional) Download the used image according to the
   settings defined in this block. Structure is documented below.
+* `cleanup_after_stop` - (Optional) When set to true remove the image directory when the job is removed.
 * [`pivot_root`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--pivot-root=) -
   (Optional) Pivot the specified directory to be the containers root directory.
 * [`resolv_conf`](https://www.freedesktop.org/software/systemd/man/systemd-nspawn.html#--resolv-conf=) -

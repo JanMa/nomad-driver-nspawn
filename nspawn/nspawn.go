@@ -76,6 +76,7 @@ type MachineConfig struct {
 	Ephemeral        bool               `codec:"ephemeral"`
 	Image            string             `codec:"image"`
 	ImageDownload    *ImageDownloadOpts `codec:"image_download,omitempty"`
+	CleanupAfterStop bool               `codec:"cleanup_after_stop"`
 	Machine          string             `codec:"machine"`
 	NetworkNamespace string             `codec:"network_namespace"`
 	NetworkVeth      bool               `codec:"network_veth"`
@@ -305,6 +306,20 @@ func (c *MachineConfig) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+func RemoveImage(name string) error {
+	conn, err := dbus.SystemBus()
+	if err != nil {
+		return err
+	}
+
+	img := conn.Object("org.freedesktop.machine1", "/org/freedesktop/machine1")
+	result := img.Call("org.freedesktop.machine1.Manager.RemoveImage", 0, name)
+	if result.Err != nil {
+		return err
+	}
 	return nil
 }
 
