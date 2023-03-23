@@ -751,6 +751,16 @@ func (d *Driver) StopTask(taskID string, timeout time.Duration, signal string) e
 		return fmt.Errorf("StopTask: executor Shutdown failed: %v", err)
 	}
 
+	var driverConfig MachineConfig
+	if err := handle.taskConfig.DecodeDriverConfig(&driverConfig); err != nil {
+		return fmt.Errorf("failed to decode driver config: %v", err)
+	}
+	if driverConfig.CleanupAfterStop {
+		if err := RemoveImage(handle.machine.RootDirectory, d.logger); err != nil {
+			return fmt.Errorf("could not remove image: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -776,7 +786,7 @@ func (d *Driver) DestroyTask(taskID string, force bool) error {
 		return fmt.Errorf("failed to decode driver config: %v", err)
 	}
 	if driverConfig.CleanupAfterStop {
-		if err := RemoveImage(handle.machine.RootDirectory); err != nil {
+		if err := RemoveImage(handle.machine.RootDirectory, d.logger); err != nil {
 			return fmt.Errorf("could not remove image: %w", err)
 		}
 	}

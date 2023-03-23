@@ -309,7 +309,8 @@ func (c *MachineConfig) Validate() error {
 	return nil
 }
 
-func RemoveImage(name string) error {
+func RemoveImage(name string, logger hclog.Logger) error {
+	logger.Debug("remove image", "name", name)
 	conn, err := dbus.SystemBus()
 	if err != nil {
 		return err
