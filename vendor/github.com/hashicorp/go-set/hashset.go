@@ -173,6 +173,11 @@ func (s *HashSet[T, H]) Size() int {
 	return len(s.items)
 }
 
+// Empty returns true if s contains no elements, false otherwise.
+func (s *HashSet[T, H]) Empty() bool {
+	return s.Size() == 0
+}
+
 // Union returns a set that contains all elements of s and o combined.
 func (s *HashSet[T, H]) Union(o *HashSet[T, H]) *HashSet[T, H] {
 	result := NewHashSet[T, H](s.Size())
@@ -220,8 +225,8 @@ func (s *HashSet[T, H]) Copy() *HashSet[T, H] {
 	return result
 }
 
-// List creates a copy of s as a slice.
-func (s *HashSet[T, H]) List() []T {
+// Slice creates a copy of s as a slice.
+func (s *HashSet[T, H]) Slice() []T {
 	result := make([]T, 0, s.Size())
 	for _, item := range s.items {
 		result = append(result, item)
@@ -229,9 +234,25 @@ func (s *HashSet[T, H]) List() []T {
 	return result
 }
 
-// String creates a string representation of s, using f to transform each element
+// List creates a copy of s as a slice.
+//
+// Deprecated: use Slice() instead.
+func (s *HashSet[T, H]) List() []T {
+	return s.Slice()
+}
+
+// String creates a string representation of s, using "%v" printf formatting to transform
+// each element into a string. The result contains elements sorted by their lexical
+// string order.
+func (s *HashSet[T, H]) String() string {
+	return s.StringFunc(func(element T) string {
+		return fmt.Sprintf("%v", element)
+	})
+}
+
+// StringFunc creates a string representation of s, using f to transform each element
 // into a string. The result contains elements sorted by their string order.
-func (s *HashSet[T, H]) String(f func(element T) string) string {
+func (s *HashSet[T, H]) StringFunc(f func(element T) string) string {
 	l := make([]string, 0, s.Size())
 	for _, item := range s.items {
 		l = append(l, f(item))

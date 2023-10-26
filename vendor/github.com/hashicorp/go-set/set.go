@@ -181,6 +181,11 @@ func (s *Set[T]) Size() int {
 	return len(s.items)
 }
 
+// Empty returns true if s contains no elements, false otherwise.
+func (s *Set[T]) Empty() bool {
+	return s.Size() == 0
+}
+
 // Union returns a set that contains all elements of s and o combined.
 func (s *Set[T]) Union(o *Set[T]) *Set[T] {
 	result := New[T](s.Size())
@@ -228,8 +233,8 @@ func (s *Set[T]) Copy() *Set[T] {
 	return result
 }
 
-// List creates a copy of s as a slice.
-func (s *Set[T]) List() []T {
+// Slice creates a copy of s as a slice. Elements are in no particular order.
+func (s *Set[T]) Slice() []T {
 	result := make([]T, 0, s.Size())
 	for item := range s.items {
 		result = append(result, item)
@@ -237,9 +242,25 @@ func (s *Set[T]) List() []T {
 	return result
 }
 
-// String creates a string representation of s, using f to transform each element
-// into a string. The result contains elements sorted by their string order.
-func (s *Set[T]) String(f func(element T) string) string {
+// List creates a copy of s as a slice.
+//
+// Deprecated: use Slice() instead.
+func (s *Set[T]) List() []T {
+	return s.Slice()
+}
+
+// String creates a string representation of s, using "%v" printf formating to transform
+// each element into a string. The result contains elements sorted by their lexical
+// string order.
+func (s *Set[T]) String() string {
+	return s.StringFunc(func(element T) string {
+		return fmt.Sprintf("%v", element)
+	})
+}
+
+// StringFunc creates a string representation of s, using f to transform each element
+// into a string. The result contains elements sorted by their lexical string order.
+func (s *Set[T]) StringFunc(f func(element T) string) string {
 	l := make([]string, 0, s.Size())
 	for item := range s.items {
 		l = append(l, f(item))
