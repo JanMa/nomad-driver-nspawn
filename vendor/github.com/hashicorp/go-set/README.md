@@ -33,7 +33,7 @@ for k := range m {
 
 The same result, but in one line using package `go-set`.
 ```go
-list := set.From[string](items).List()
+list := set.From[string](items).Slice()
 ```
 
 # Hash Function
@@ -58,6 +58,7 @@ Implements the following set operations
 - ContainsAll
 - Subset
 - Size
+- Empty
 - Union
 - Difference
 - Intersect
@@ -66,7 +67,7 @@ Provides helper methods
 
 - Equal
 - Copy
-- List
+- Slice
 - String
 
 # Install

@@ -612,6 +612,10 @@ type JobRegisterRequest struct {
 	// Eval is the evaluation that is associated with the job registration
 	Eval *Evaluation
 
+	// Deployment is the deployment to be create when the job is registered. If
+	// there is an active deployment for the job it will be canceled.
+	Deployment *Deployment
+
 	WriteRequest
 }
 
@@ -2017,6 +2021,14 @@ type Node struct {
 	// LastDrain contains metadata about the most recent drain operation
 	LastDrain *DrainMetadata
 
+	// LastMissedHeartbeatIndex stores the Raft index when the node last missed
+	// a heartbeat. It resets to zero once the node is marked as ready again.
+	LastMissedHeartbeatIndex uint64
+
+	// LastAllocUpdateIndex stores the Raft index of the last time the node
+	// updatedd its allocations status.
+	LastAllocUpdateIndex uint64
+
 	// Raft Indexes
 	CreateIndex uint64
 	ModifyIndex uint64
@@ -2109,6 +2121,17 @@ func (n *Node) Copy() *Node {
 	nn.HostNetworks = helper.DeepCopyMap(n.HostNetworks)
 	nn.LastDrain = nn.LastDrain.Copy()
 	return &nn
+}
+
+// UnresponsiveStatus returns true if the node is a status where it is not
+// communicating with the server.
+func (n *Node) UnresponsiveStatus() bool {
+	switch n.Status {
+	case NodeStatusDown, NodeStatusDisconnected:
+		return true
+	default:
+		return false
+	}
 }
 
 // TerminalStatus returns if the current status is terminal and
@@ -2578,7 +2601,7 @@ func (p AllocatedPorts) Get(label string) (AllocatedPortMapping, bool) {
 }
 
 type Port struct {
-	// Label is the key for HCL port stanzas: port "foo" {}
+	// Label is the key for HCL port blocks: port "foo" {}
 	Label string
 
 	// Value is the static or dynamic port value. For dynamic ports this
@@ -2890,7 +2913,7 @@ type NodeResources struct {
 
 	// Networks is the node's bridge network and default interface. It is
 	// only used when scheduling jobs with a deprecated
-	// task.resources.network stanza.
+	// task.resources.network block.
 	Networks Networks
 
 	// MinDynamicPort and MaxDynamicPort represent the inclusive port range
@@ -4123,7 +4146,7 @@ type Job struct {
 	TaskGroups []*TaskGroup
 
 	// See agent.ApiJobToStructJob
-	// Update provides defaults for the TaskGroup Update stanzas
+	// Update provides defaults for the TaskGroup Update blocks
 	Update UpdateStrategy
 
 	Multiregion *Multiregion
@@ -4182,7 +4205,7 @@ type Job struct {
 	// of a deployment and can be manually set via APIs. This field is updated
 	// when the status of a corresponding deployment transitions to Failed
 	// or Successful. This field is not meaningful for jobs that don't have an
-	// update stanza.
+	// update block.
 	Stable bool
 
 	// Version is a monotonically increasing version number that is incremented
@@ -4348,7 +4371,7 @@ func (j *Job) Validate() error {
 	}
 	if j.Type == JobTypeSystem {
 		if j.Affinities != nil {
-			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have an affinity stanza"))
+			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have an affinity block"))
 		}
 	} else {
 		for idx, affinity := range j.Affinities {
@@ -4361,7 +4384,7 @@ func (j *Job) Validate() error {
 
 	if j.Type == JobTypeSystem {
 		if j.Spreads != nil {
-			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have a spread stanza"))
+			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have a spread block"))
 		}
 	} else {
 		for idx, spread := range j.Spreads {
@@ -6320,15 +6343,27 @@ func (tg *TaskGroup) Canonicalize(job *Job) {
 // NomadServices returns a list of all group and task - level services in tg that
 // are making use of the nomad service provider.
 func (tg *TaskGroup) NomadServices() []*Service {
+	return tg.filterServices(func(s *Service) bool {
+		return s.Provider == ServiceProviderNomad
+	})
+}
+
+func (tg *TaskGroup) ConsulServices() []*Service {
+	return tg.filterServices(func(s *Service) bool {
+		return s.Provider == ServiceProviderConsul || s.Provider == ""
+	})
+}
+
+func (tg *TaskGroup) filterServices(f func(s *Service) bool) []*Service {
 	var services []*Service
 	for _, service := range tg.Services {
-		if service.Provider == ServiceProviderNomad {
+		if f(service) {
 			services = append(services, service)
 		}
 	}
 	for _, task := range tg.Tasks {
 		for _, service := range task.Services {
-			if service.Provider == ServiceProviderNomad {
+			if f(service) {
 				services = append(services, service)
 			}
 		}
@@ -6368,7 +6403,7 @@ func (tg *TaskGroup) Validate(j *Job) error {
 	}
 	if j.Type == JobTypeSystem {
 		if tg.Affinities != nil {
-			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have an affinity stanza"))
+			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have an affinity block"))
 		}
 	} else {
 		for idx, affinity := range tg.Affinities {
@@ -6389,7 +6424,7 @@ func (tg *TaskGroup) Validate(j *Job) error {
 
 	if j.Type == JobTypeSystem {
 		if tg.Spreads != nil {
-			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have a spread stanza"))
+			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have a spread block"))
 		}
 	} else {
 		for idx, spread := range tg.Spreads {
@@ -6475,7 +6510,7 @@ func (tg *TaskGroup) Validate(j *Job) error {
 		canaries = tg.Update.Canary
 	}
 	for name, volReq := range tg.Volumes {
-		if err := volReq.Validate(tg.Count, canaries); err != nil {
+		if err := volReq.Validate(j.Type, tg.Count, canaries); err != nil {
 			mErr.Errors = append(mErr.Errors, fmt.Errorf(
 				"Task group volume validation for %s failed: %v", name, err))
 		}
@@ -6730,7 +6765,7 @@ func (tg *TaskGroup) validateServices() error {
 		mErr.Errors = append(mErr.Errors,
 			fmt.Errorf(
 				"Services are not unique: %s",
-				idDuplicateSet.String(
+				idDuplicateSet.StringFunc(
 					func(u unique) string {
 						s := u.task + "->" + u.name
 						if u.port != "" {
@@ -7265,7 +7300,7 @@ func (t *Task) Validate(ephemeralDisk *EphemeralDisk, jobType string, tgServices
 
 	if jobType == JobTypeSystem {
 		if t.Affinities != nil {
-			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have an affinity stanza"))
+			mErr.Errors = append(mErr.Errors, fmt.Errorf("System jobs may not have an affinity block"))
 		}
 	} else {
 		for idx, affinity := range t.Affinities {
@@ -7335,9 +7370,9 @@ func (t *Task) Validate(ephemeralDisk *EphemeralDisk, jobType string, tgServices
 
 	// Validation for TaskKind field which is used for Consul Connect integration
 	if t.Kind.IsConnectProxy() {
-		// This task is a Connect proxy so it should not have service stanzas
+		// This task is a Connect proxy so it should not have service blocks
 		if len(t.Services) > 0 {
-			mErr.Errors = append(mErr.Errors, fmt.Errorf("Connect proxy task must not have a service stanza"))
+			mErr.Errors = append(mErr.Errors, fmt.Errorf("Connect proxy task must not have a service block"))
 		}
 		if t.Leader {
 			mErr.Errors = append(mErr.Errors, fmt.Errorf("Connect proxy task must not have leader set"))
@@ -7530,7 +7565,7 @@ func (t *Task) Warnings() error {
 
 	// Validate the resources
 	if t.Resources != nil && t.Resources.IOPS != 0 {
-		mErr.Errors = append(mErr.Errors, fmt.Errorf("IOPS has been deprecated as of Nomad 0.9.0. Please remove IOPS from resource stanza."))
+		mErr.Errors = append(mErr.Errors, fmt.Errorf("IOPS has been deprecated as of Nomad 0.9.0. Please remove IOPS from resource block."))
 	}
 
 	if t.Resources != nil && len(t.Resources.Networks) != 0 {
@@ -7857,7 +7892,7 @@ func (t *Template) Warnings() error {
 
 	// Deprecation notice for vault_grace
 	if t.VaultGrace != 0 {
-		mErr.Errors = append(mErr.Errors, fmt.Errorf("VaultGrace has been deprecated as of Nomad 0.11 and ignored since Vault 0.5. Please remove VaultGrace / vault_grace from template stanza."))
+		mErr.Errors = append(mErr.Errors, fmt.Errorf("VaultGrace has been deprecated as of Nomad 0.11 and ignored since Vault 0.5. Please remove VaultGrace / vault_grace from template block."))
 	}
 
 	return mErr.ErrorOrNil()
@@ -9032,7 +9067,7 @@ func (s *Spread) Validate() error {
 		mErr.Errors = append(mErr.Errors, errors.New("Missing spread attribute"))
 	}
 	if s.Weight <= 0 || s.Weight > 100 {
-		mErr.Errors = append(mErr.Errors, errors.New("Spread stanza must have a positive weight from 0 to 100"))
+		mErr.Errors = append(mErr.Errors, errors.New("Spread block must have a positive weight from 0 to 100"))
 	}
 	seen := make(map[string]struct{})
 	sumPercent := uint32(0)
@@ -9219,14 +9254,15 @@ func (v *Vault) Validate() error {
 
 const (
 	// DeploymentStatuses are the various states a deployment can be be in
-	DeploymentStatusRunning    = "running"
-	DeploymentStatusPaused     = "paused"
-	DeploymentStatusFailed     = "failed"
-	DeploymentStatusSuccessful = "successful"
-	DeploymentStatusCancelled  = "cancelled"
-	DeploymentStatusPending    = "pending"
-	DeploymentStatusBlocked    = "blocked"
-	DeploymentStatusUnblocking = "unblocking"
+	DeploymentStatusRunning      = "running"
+	DeploymentStatusPaused       = "paused"
+	DeploymentStatusFailed       = "failed"
+	DeploymentStatusSuccessful   = "successful"
+	DeploymentStatusCancelled    = "cancelled"
+	DeploymentStatusInitializing = "initializing"
+	DeploymentStatusPending      = "pending"
+	DeploymentStatusBlocked      = "blocked"
+	DeploymentStatusUnblocking   = "unblocking"
 
 	// TODO Statuses and Descriptions do not match 1:1 and we sometimes use the Description as a status flag
 
@@ -9360,7 +9396,8 @@ func (d *Deployment) Copy() *Deployment {
 // Active returns whether the deployment is active or terminal.
 func (d *Deployment) Active() bool {
 	switch d.Status {
-	case DeploymentStatusRunning, DeploymentStatusPaused, DeploymentStatusBlocked, DeploymentStatusUnblocking, DeploymentStatusPending:
+	case DeploymentStatusRunning, DeploymentStatusPaused, DeploymentStatusBlocked,
+		DeploymentStatusUnblocking, DeploymentStatusInitializing, DeploymentStatusPending:
 		return true
 	default:
 		return false
@@ -11771,6 +11808,7 @@ type KeyringRequest struct {
 type RecoverableError struct {
 	Err         string
 	Recoverable bool
+	wrapped     error
 }
 
 // NewRecoverableError is used to wrap an error and mark it as recoverable or
@@ -11783,6 +11821,7 @@ func NewRecoverableError(e error, recoverable bool) error {
 	return &RecoverableError{
 		Err:         e.Error(),
 		Recoverable: recoverable,
+		wrapped:     e,
 	}
 }
 
@@ -11803,6 +11842,10 @@ func (r *RecoverableError) IsRecoverable() bool {
 
 func (r *RecoverableError) IsUnrecoverable() bool {
 	return !r.Recoverable
+}
+
+func (r *RecoverableError) Unwrap() error {
+	return r.wrapped
 }
 
 // Recoverable is an interface for errors to implement to indicate whether or
