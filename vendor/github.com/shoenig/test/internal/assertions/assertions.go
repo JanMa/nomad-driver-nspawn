@@ -264,7 +264,7 @@ func validJSON(input []byte) (s string) {
 	return
 }
 
-func EqSliceFunc[A any](exp, val []A, eq func(a, b A) bool) (s string) {
+func EqSliceFunc[A, B any](exp []B, val []A, eq func(a A, b B) bool) (s string) {
 	lenA, lenB := len(exp), len(val)
 
 	if lenA != lenB {
@@ -277,7 +277,7 @@ func EqSliceFunc[A any](exp, val []A, eq func(a, b A) bool) (s string) {
 
 	miss := false
 	for i := 0; i < lenA; i++ {
-		if !eq(exp[i], val[i]) {
+		if !eq(val[i], exp[i]) {
 			miss = true
 			break
 		}
@@ -303,7 +303,6 @@ func Equal[E interfaces.EqualFunc[E]](exp, val E) (s string) {
 func NotEqual[E interfaces.EqualFunc[E]](exp, val E) (s string) {
 	if val.Equal(exp) {
 		s = "expected inequality via .Equal method\n"
-		s += diff(exp, val, nil)
 	}
 	return
 }
@@ -403,6 +402,14 @@ func SliceNotContains[A any](slice []A, item A, opts ...cmp.Option) (s string) {
 			s += bullet("unwanted item %#v\n", item)
 			return
 		}
+	}
+	return
+}
+
+func SliceNotContainsFunc[A, B any](slice []A, item B, eq func(a A, b B) bool) (s string) {
+	if containsFunc(slice, item, eq) {
+		s = "expected slice to not contain item but it does\n"
+		s += bullet("unwanted item %#v\n", item)
 	}
 	return
 }
@@ -535,6 +542,24 @@ func BetweenExclusive[O constraints.Ordered](lower, val, upper O) (s string) {
 	return
 }
 
+func Min[A any, C interfaces.MinFunc[A]](expect A, collection C, opts ...cmp.Option) (s string) {
+	min := collection.Min()
+	if !equal(expect, min, opts) {
+		s = "expected a different value for min\n"
+		s += diff(expect, min, opts)
+	}
+	return
+}
+
+func Max[A any, C interfaces.MaxFunc[A]](expect A, collection C, opts ...cmp.Option) (s string) {
+	max := collection.Max()
+	if !equal(expect, max, opts) {
+		s = "expected a different value for max\n"
+		s += diff(expect, max, opts)
+	}
+	return
+}
+
 func Ascending[O constraints.Ordered](slice []O) (s string) {
 	for i := 0; i < len(slice)-1; i++ {
 		if slice[i] > slice[i+1] {
@@ -551,6 +576,19 @@ func AscendingFunc[A any](slice []A, less func(a, b A) bool) (s string) {
 	for i := 0; i < len(slice)-1; i++ {
 		if !less(slice[i], slice[i+1]) {
 			s = fmt.Sprintf("expected less(slice[%d], slice[%d])\n", i, i+1)
+			s += bullet("slice[%d]: %v\n", i, slice[i])
+			s += bullet("slice[%d]: %v\n", i+1, slice[i+1])
+			return
+		}
+	}
+	return
+}
+
+func AscendingCmp[A any](slice []A, compare func(a, b A) int) (s string) {
+	for i := 0; i < len(slice)-1; i++ {
+		cmp := compare(slice[i], slice[i+1])
+		if cmp > 0 {
+			s = fmt.Sprintf("expected compare(slice[%d], slice[%d]) <= 0\n", i, i+1)
 			s += bullet("slice[%d]: %v\n", i, slice[i])
 			s += bullet("slice[%d]: %v\n", i+1, slice[i+1])
 			return
@@ -587,6 +625,19 @@ func DescendingFunc[A any](slice []A, less func(a, b A) bool) (s string) {
 	for i := 0; i < len(slice)-1; i++ {
 		if !less(slice[i+1], slice[i]) {
 			s = fmt.Sprintf("expected less(slice[%d], slice[%d])\n", i+1, i)
+			s += bullet("slice[%d]: %v\n", i, slice[i])
+			s += bullet("slice[%d]: %v\n", i+1, slice[i+1])
+			return
+		}
+	}
+	return
+}
+
+func DescendingCmp[A any](slice []A, compare func(a, b A) int) (s string) {
+	for i := 0; i < len(slice)-1; i++ {
+		cmp := compare(slice[i], slice[i+1])
+		if cmp < 0 {
+			s = fmt.Sprintf("expected compare(slice[%d], slice[%d]) >= 0\n", i, i+1)
 			s += bullet("slice[%d]: %v\n", i, slice[i])
 			s += bullet("slice[%d]: %v\n", i+1, slice[i+1])
 			return
@@ -1220,6 +1271,31 @@ func Wait(wc *wait.Constraint) (s string) {
 		s = "expected condition to pass within wait context\n"
 		s += bullet("error: %v\n", err)
 		// context info?
+	}
+	return
+}
+
+type Tweak[E interfaces.CopyEqual[E]] struct {
+	Field string
+	Apply interfaces.TweakFunc[E]
+}
+
+// StructEqual will apply each Tweak and assert E.Equal captures the modification.
+func StructEqual[E interfaces.CopyEqual[E]](original E, tweaks []Tweak[E]) (s string) {
+	for _, tweak := range tweaks {
+		if tweak.Field == "" {
+			return "Tweak.Field must be set"
+		} else if tweak.Apply == nil {
+			return "Tweak.Apply must be set"
+		}
+		clone := original.Copy()
+		if s = Equal[E](original, clone); s != "" {
+			return
+		}
+		tweak.Apply(clone)
+		if s = NotEqual[E](original, clone); s != "" {
+			return
+		}
 	}
 	return
 }

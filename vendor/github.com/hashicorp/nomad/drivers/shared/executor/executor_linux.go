@@ -526,8 +526,17 @@ func configureCapabilities(cfg *lconfigs.Config, command *ExecCommand) {
 		}
 	default:
 		// otherwise apply the plugin + task capability configuration
+		//
+		// The capabilities must be set in the Ambient set as libcontainer
+		// performs `execve`` as an unprivileged user.  Ambient also requires
+		// that capabilities are Permitted and Inheritable.  Setting Effective
+		// is unnecessary, because we only need the capabilities to become
+		// effective _after_ execve, not before.
 		cfg.Capabilities = &lconfigs.Capabilities{
-			Bounding: command.Capabilities,
+			Bounding:    command.Capabilities,
+			Permitted:   command.Capabilities,
+			Inheritable: command.Capabilities,
+			Ambient:     command.Capabilities,
 		}
 	}
 }
@@ -677,9 +686,8 @@ func configureCgroups(cfg *lconfigs.Config, command *ExecCommand) error {
 		cfg.Cgroups.Resources.Memory = memHard * 1024 * 1024
 		cfg.Cgroups.Resources.MemoryReservation = memSoft * 1024 * 1024
 
-		// Disable swap to avoid issues on the machine
-		var memSwappiness uint64
-		cfg.Cgroups.Resources.MemorySwappiness = &memSwappiness
+		// Disable swap if possible, to avoid issues on the machine
+		cfg.Cgroups.Resources.MemorySwappiness = cgutil.MaybeDisableMemorySwappiness()
 	}
 
 	cpuShares := res.Cpu.CpuShares

@@ -12,6 +12,7 @@ import (
 	"github.com/shoenig/test/internal/assertions"
 	"github.com/shoenig/test/internal/brokenfs"
 	"github.com/shoenig/test/internal/constraints"
+	"github.com/shoenig/test/internal/util"
 	"github.com/shoenig/test/wait"
 )
 
@@ -147,8 +148,8 @@ func Lesser[L interfaces.LessFunc[L]](t T, exp, val L, settings ...Setting) {
 	invoke(t, assertions.Lesser(exp, val), settings...)
 }
 
-// SliceEqFunc asserts elements of exp and val are the same using eq.
-func SliceEqFunc[A any](t T, exp, val []A, eq func(a, b A) bool, settings ...Setting) {
+// SliceEqFunc asserts elements of val satisfy eq for the corresponding element in exp.
+func SliceEqFunc[A, B any](t T, exp []B, val []A, eq func(expectation A, value B) bool, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.EqSliceFunc(exp, val, eq), settings...)
 }
@@ -215,6 +216,13 @@ func SliceContains[A any](t T, slice []A, item A, settings ...Setting) {
 func SliceNotContains[A any](t T, slice []A, item A, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.SliceNotContains(slice, item), settings...)
+}
+
+// SliceNotContainsFunc asserts item does not exist inslice, using eq to compare
+// elements.
+func SliceNotContainsFunc[A, B any](t T, slice []A, item B, eq func(a A, b B) bool, settings ...Setting) {
+	t.Helper()
+	invoke(t, assertions.SliceNotContainsFunc(slice, item, eq), settings...)
 }
 
 // SliceContainsAll asserts slice and items contain the same elements, but in
@@ -310,37 +318,65 @@ func BetweenExclusive[O constraints.Ordered](t T, lower, val, upper O, settings 
 	invoke(t, assertions.BetweenExclusive(lower, val, upper), settings...)
 }
 
-// Ascending asserts slice[n] ≤ slice[n+1] for each element n.
+// Min asserts collection.Min() is equal to expect.
+//
+// The equality method may be configured with Cmp options.
+func Min[A any, C interfaces.MinFunc[A]](t T, expect A, collection C, settings ...Setting) {
+	t.Helper()
+	invoke(t, assertions.Min(expect, collection, options(settings...)...), settings...)
+}
+
+// Max asserts collection.Max() is equal to expect.
+//
+// The equality method may be configured with Cmp options.
+func Max[A any, C interfaces.MaxFunc[A]](t T, expect A, collection C, settings ...Setting) {
+	t.Helper()
+	invoke(t, assertions.Max(expect, collection, options(settings...)...), settings...)
+}
+
+// Ascending asserts slice[n] ≤ slice[n+1] for each element.
 func Ascending[O constraints.Ordered](t T, slice []O, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.Ascending(slice), settings...)
 }
 
-// AscendingFunc asserts slice[n] is less than slice[n+1] for each element n using the less comparator.
+// AscendingFunc asserts slice[n] is less than slice[n+1] for each element using the less comparator.
 func AscendingFunc[A any](t T, slice []A, less func(A, A) bool, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.AscendingFunc(slice, less), settings...)
 }
 
-// AscendingLess asserts slice[n].Less(slice[n+1]) for each element n.
+// AscendingCmp asserts slice[n] is less than slice[n+1] for each element using the cmp comparator.
+func AscendingCmp[A any](t T, slice []A, compare func(A, A) int, settings ...Setting) {
+	t.Helper()
+	invoke(t, assertions.AscendingCmp(slice, compare), settings...)
+}
+
+// AscendingLess asserts slice[n].Less(slice[n+1]) for each element.
 func AscendingLess[L interfaces.LessFunc[L]](t T, slice []L, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.AscendingLess(slice), settings...)
 }
 
-// Descending asserts slice[n] ≥ slice[n+1] for each element n.
+// Descending asserts slice[n] ≥ slice[n+1] for each element.
 func Descending[O constraints.Ordered](t T, slice []O, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.Descending(slice), settings...)
 }
 
-// DescendingFunc asserts slice[n+1] is less than slice[n] for each element n using the less comparator.
+// DescendingFunc asserts slice[n+1] is less than slice[n] for each element using the less comparator.
 func DescendingFunc[A any](t T, slice []A, less func(A, A) bool, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.DescendingFunc(slice, less), settings...)
 }
 
-// DescendingLess asserts slice[n+1].Less(slice[n]) for each element n.
+// DescendingCmp asserts slice[n+1] is ≤ slice[n] for each element.
+func DescendingCmp[A any](t T, slice []A, compare func(A, A) int, settings ...Setting) {
+	t.Helper()
+	invoke(t, assertions.DescendingCmp(slice, compare), settings...)
+}
+
+// DescendingLess asserts slice[n+1].Less(slice[n]) for each element.
 func DescendingLess[L interfaces.LessFunc[L]](t T, slice []L, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.DescendingLess(slice), settings...)
@@ -714,4 +750,31 @@ func NotContains[C any](t T, element C, container interfaces.ContainsFunc[C], se
 func Wait(t T, wc *wait.Constraint, settings ...Setting) {
 	t.Helper()
 	invoke(t, assertions.Wait(wc), settings...)
+}
+
+// Tweak is used to modify a struct and assert its Equal method captures the
+// modification.
+//
+// Field is the name of the struct field and is used only for error printing.
+// Apply is a function that modifies E.
+type Tweak[E interfaces.CopyEqual[E]] struct {
+	Field string
+	Apply interfaces.TweakFunc[E]
+}
+
+// Tweaks is a slice of Tweak.
+type Tweaks[E interfaces.CopyEqual[E]] []Tweak[E]
+
+// StructEqual will apply each Tweak and assert E.Equal captures the modification.
+func StructEqual[E interfaces.CopyEqual[E]](t T, original E, tweaks Tweaks[E], settings ...Setting) {
+	t.Helper()
+	invoke(t, assertions.StructEqual(
+		original,
+		util.CloneSliceFunc(
+			tweaks,
+			func(tweak Tweak[E]) assertions.Tweak[E] {
+				return assertions.Tweak[E]{Field: tweak.Field, Apply: tweak.Apply}
+			},
+		),
+	), settings...)
 }
