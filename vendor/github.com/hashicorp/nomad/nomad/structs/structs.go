@@ -4972,6 +4972,12 @@ func (u *UpdateStrategy) IsEmpty() bool {
 		return true
 	}
 
+	// When the Job is transformed from api to struct, the Update Strategy block is
+	// copied into the existing task groups, the only things that are passed along
+	// are MaxParallel and Stagger, because they are enforced at job level.
+	// That is why checking if MaxParallel is zero is enough to know if the
+	// update block is empty.
+
 	return u.MaxParallel == 0
 }
 
@@ -6540,6 +6546,8 @@ func (tg *TaskGroup) Validate(j *Job) error {
 		mErr.Errors = append(mErr.Errors, outer)
 	}
 
+	isTypeService := j.Type == JobTypeService
+
 	// Validate the tasks
 	for _, task := range tg.Tasks {
 		// Validate the task does not reference undefined volume mounts
@@ -6558,6 +6566,16 @@ func (tg *TaskGroup) Validate(j *Job) error {
 		if err := task.Validate(tg.EphemeralDisk, j.Type, tg.Services, tg.Networks); err != nil {
 			outer := fmt.Errorf("Task %s validation failed: %v", task.Name, err)
 			mErr.Errors = append(mErr.Errors, outer)
+		}
+
+		// Validate the group's Update Strategy does not conflict with the Task's kill_timeout for service type jobs
+		if isTypeService && tg.Update != nil {
+			// progress_deadline = 0 has a special meaning so it should not be
+			// validated against the task's kill_timeout.
+			if tg.Update.ProgressDeadline > 0 && task.KillTimeout > tg.Update.ProgressDeadline {
+				mErr.Errors = append(mErr.Errors, fmt.Errorf("Task %s has a kill timout (%s) longer than the group's progress deadline (%s)",
+					task.Name, task.KillTimeout.String(), tg.Update.ProgressDeadline.String()))
+			}
 		}
 	}
 
@@ -9467,6 +9485,14 @@ func (d *Deployment) GoString() string {
 		base += fmt.Sprintf("\nTask Group %q has state:\n%#v", group, state)
 	}
 	return base
+}
+
+// GetNamespace implements the NamespaceGetter interface, required for pagination.
+func (d *Deployment) GetNamespace() string {
+	if d == nil {
+		return ""
+	}
+	return d.Namespace
 }
 
 // DeploymentState tracks the state of a deployment for a given task group.

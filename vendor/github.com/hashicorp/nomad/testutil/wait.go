@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/kr/pretty"
 	"github.com/shoenig/test/must"
+	"github.com/shoenig/test/wait"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hashicorp/nomad/nomad/structs"
 )
 
 type testFn func() (bool, error)
@@ -135,6 +137,25 @@ func WaitForLeader(t testing.TB, rpc rpcFn) {
 	})
 }
 
+// WaitForLeaders blocks until each serverRPC knows the leader.
+func WaitForLeaders(t testing.TB, serverRPCs ...rpcFn) {
+	t.Helper()
+
+	for i := 0; i < len(serverRPCs); i++ {
+		ok := func() (bool, error) {
+			args := &structs.GenericRequest{}
+			var leader string
+			err := serverRPCs[i]("Status.Leader", args, &leader)
+			return leader != "", err
+		}
+		must.Wait(t, wait.InitialSuccess(
+			wait.TestFunc(ok),
+			wait.Timeout(10*time.Second),
+			wait.Gap(1*time.Second),
+		))
+	}
+}
+
 // WaitForClient blocks until the client can be found
 func WaitForClient(t testing.TB, rpc rpcFn, nodeID string, region string) {
 	t.Helper()
@@ -208,6 +229,7 @@ func WaitForVotingMembers(t testing.TB, rpc rpcFn, nPeers int) {
 
 // RegisterJobWithToken registers a job and uses the job's Region and Namespace.
 func RegisterJobWithToken(t testing.TB, rpc rpcFn, job *structs.Job, token string) {
+	t.Helper()
 	WaitForResult(func() (bool, error) {
 		args := &structs.JobRegisterRequest{}
 		args.Job = job

@@ -6,10 +6,34 @@ import (
 	"github.com/shoenig/test/internal/constraints"
 )
 
+// MinFunc represents a type implementing the Min method.
+type MinFunc[T any] interface {
+	Min() T
+}
+
+// MaxFunc represents a type implementing the Max method.
+type MaxFunc[T any] interface {
+	Max() T
+}
+
 // EqualFunc represents a type implementing the Equal method.
 type EqualFunc[A any] interface {
 	Equal(A) bool
 }
+
+// CopyFunc represents a type implementing the Copy method.
+type CopyFunc[A any] interface {
+	Copy() A
+}
+
+// CopyEqual represents a type satisfying both EqualFunc and CopyFunc.
+type CopyEqual[T any] interface {
+	EqualFunc[T]
+	CopyFunc[T]
+}
+
+// TweakFunc is used for modifying a value in tests.
+type TweakFunc[E CopyEqual[E]] func(E)
 
 // LessFunc represents any type implementing the Less method.
 type LessFunc[A any] interface {

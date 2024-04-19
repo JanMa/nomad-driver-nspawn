@@ -13,6 +13,16 @@ type MountInfo struct {
 	IsDevice bool
 }
 
+func (mi *MountInfo) Copy() *MountInfo {
+	if mi == nil {
+		return nil
+	}
+
+	nmi := new(MountInfo)
+	*nmi = *mi
+	return nmi
+}
+
 type UsageOptions struct {
 	ReadOnly       bool
 	AttachmentMode structs.CSIVolumeAttachmentMode
@@ -43,11 +53,17 @@ func (u *UsageOptions) ToFS() string {
 type VolumeMounter interface {
 	MountVolume(ctx context.Context, vol *structs.CSIVolume, alloc *structs.Allocation, usageOpts *UsageOptions, publishContext map[string]string) (*MountInfo, error)
 	UnmountVolume(ctx context.Context, volID, remoteID, allocID string, usageOpts *UsageOptions) error
+	HasMount(ctx context.Context, mountInfo *MountInfo) (bool, error)
+	ExternalID() string
 }
 
 type Manager interface {
 	// PluginManager returns a PluginManager for use by the node fingerprinter.
 	PluginManager() pluginmanager.PluginManager
+
+	// WaitForPlugin waits for the plugin to become available,
+	// or until its context is canceled or times out.
+	WaitForPlugin(ctx context.Context, pluginType, pluginID string) error
 
 	// MounterForPlugin returns a VolumeMounter for the plugin ID associated
 	// with the volume.	Returns an error if this plugin isn't registered.
