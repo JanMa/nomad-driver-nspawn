@@ -197,3 +197,36 @@ The `image_download` block supports the following arguments:
   exists, delete it first and replace it by the newly downloaded image.
 * `type` - (Optional) `tar` (default), `raw` or `docker`. The type of image to
   download.
+
+## Networking
+
+The `nspawn` driver has support for host networking and also bridge mode
+networking. It can therefore be used with Consul service mesh.
+
+## Plugin Options
+
+- `enabled` - The `nspawn` driver may be disabled on hosts by setting this
+  option to `false` (defaults to `true`).
+
+- `volumes` - Enable support for Volumes in the driver (defaults to `true`).
+
+An example of using these plugin options with the new plugin syntax is
+shown below:
+
+```hcl
+plugin "nspawn" {
+  config {
+    enabled = true
+    volumes = true
+  }
+}
+```
+
+## Client Attributes
+
+The `nspawn` driver will set the following client attributes:
+
+- `driver.nspawn` - Set to `true` if systemd-nspawn is found and enabled on the
+  host node and Nomad is running with root privileges.
+
+- `driver.nspawn.version` - Version of `systemd-nspawn` e.g.: `244`.
