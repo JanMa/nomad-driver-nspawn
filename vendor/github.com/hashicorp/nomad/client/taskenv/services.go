@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package taskenv
 
 import (
@@ -42,6 +45,7 @@ func InterpolateService(taskEnv *TaskEnv, origService *structs.Service) *structs
 		check.Protocol = taskEnv.ReplaceEnv(check.Protocol)
 		check.PortLabel = taskEnv.ReplaceEnv(check.PortLabel)
 		check.InitialStatus = taskEnv.ReplaceEnv(check.InitialStatus)
+		check.Notes = taskEnv.ReplaceEnv(check.Notes)
 		check.Method = taskEnv.ReplaceEnv(check.Method)
 		check.GRPCService = taskEnv.ReplaceEnv(check.GRPCService)
 		check.Header = interpolateMapStringSliceString(taskEnv, check.Header)
@@ -84,12 +88,12 @@ func interpolateMapStringString(taskEnv *TaskEnv, orig map[string]string) map[st
 	return m
 }
 
-func interpolateMapStringInterface(taskEnv *TaskEnv, orig map[string]interface{}) map[string]interface{} {
+func interpolateMapStringInterface(taskEnv *TaskEnv, orig map[string]any) map[string]any {
 	if len(orig) == 0 {
 		return nil
 	}
 
-	m := make(map[string]interface{}, len(orig))
+	m := make(map[string]any, len(orig))
 	for k, v := range orig {
 		envK := taskEnv.ReplaceEnv(k)
 		if vStr, ok := v.(string); ok {
@@ -165,6 +169,7 @@ func interpolateConnectSidecarService(taskEnv *TaskEnv, sidecar *structs.ConsulS
 			sidecar.Proxy.Upstreams[i].Datacenter = taskEnv.ReplaceEnv(sidecar.Proxy.Upstreams[i].Datacenter)
 			sidecar.Proxy.Upstreams[i].DestinationName = taskEnv.ReplaceEnv(sidecar.Proxy.Upstreams[i].DestinationName)
 			sidecar.Proxy.Upstreams[i].LocalBindAddress = taskEnv.ReplaceEnv(sidecar.Proxy.Upstreams[i].LocalBindAddress)
+			sidecar.Proxy.Upstreams[i].Config = interpolateMapStringInterface(taskEnv, sidecar.Proxy.Upstreams[i].Config)
 		}
 		sidecar.Proxy.Config = interpolateMapStringInterface(taskEnv, sidecar.Proxy.Config)
 	}
@@ -215,5 +220,18 @@ func interpolateTaskResources(taskEnv *TaskEnv, resources *structs.Resources) {
 			resources.Networks[i].ReservedPorts[p].HostNetwork = taskEnv.ReplaceEnv(resources.Networks[i].ReservedPorts[p].HostNetwork)
 			resources.Networks[i].ReservedPorts[p].Label = taskEnv.ReplaceEnv(resources.Networks[i].ReservedPorts[p].Label)
 		}
+	}
+}
+
+// InterpolateWIHandle returns a copy of the WIHandle with only the
+// InterpolatedWorkloadIdentifier field interpolated. The original
+// WorkloadIdentifier should never be altered so the server can find
+// uninterpolated services associated with the handle.
+func InterpolateWIHandle(taskEnv *TaskEnv, orig structs.WIHandle) structs.WIHandle {
+	return structs.WIHandle{
+		IdentityName:                   orig.IdentityName,
+		WorkloadIdentifier:             orig.WorkloadIdentifier,
+		WorkloadType:                   orig.WorkloadType,
+		InterpolatedWorkloadIdentifier: taskEnv.ReplaceEnv(orig.WorkloadIdentifier),
 	}
 }

@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package config
 
 import (
@@ -15,46 +18,51 @@ const (
 
 // VaultConfig contains the configuration information necessary to
 // communicate with Vault in order to:
-//
-// - Renew Vault tokens/leases.
-//
-// - Pass a token for the Nomad Server to derive sub-tokens.
-//
-// - Create child tokens with policy subsets of the Server's token.
+//   - Renew Vault tokens/leases.
+//   - Pass a token for the Nomad Server to derive sub-tokens.
+//   - Create child tokens with policy subsets of the Server's token.
+//   - Create Vault ACL tokens from workload identity JWTs.
 type VaultConfig struct {
+	// Servers and clients fields.
+
+	// Name is used to identify the Vault cluster related to this
+	// configuration.
+	Name string `mapstructure:"name"`
 
 	// Enabled enables or disables Vault support.
-	Enabled *bool `hcl:"enabled"`
+	Enabled *bool `mapstructure:"enabled"`
 
-	// Token is the Vault token given to Nomad such that it can
-	// derive child tokens. Nomad will renew this token at half its lease
-	// lifetime.
-	Token string `hcl:"token"`
-
-	// Role sets the role in which to create tokens from. The Token given to
-	// Nomad does not have to be created from this role but must have "update"
+	// Role sets the role in which to create tokens from.
+	//
+	// When using workload identities this field defines the default role to
+	// use when a job does not define a role in its `vault` block. If this
+	// config value is also unset, the default auth method or cluster global
+	// role is used.
+	//
+	// When not using workload identities, the Nomad servers will derive tokens
+	// using this role. The Vault token provided to the Nomad server config
+	// does not have to be created from this role but must have "update"
 	// capability on "auth/token/create/<create_from_role>". If this value is
-	// unset and the token is created from a role, the value is defaulted to the
-	// role the token is from.
-	Role string `hcl:"create_from_role"`
+	// unset and the token is created from a role, the value is defaulted to
+	// the role the token is from.
+	//
+	// This used to be a server-only field, but it's a client-only field when
+	// workload identities are used, so it should be set in both places during
+	// the transition period.
+	Role string `mapstructure:"create_from_role"`
+
+	// Clients-only fields.
 
 	// Namespace sets the Vault namespace used for all calls against the
 	// Vault API. If this is unset, then Nomad does not use Vault namespaces.
 	Namespace string `mapstructure:"namespace"`
 
-	// AllowUnauthenticated allows users to submit jobs requiring Vault tokens
-	// without providing a Vault token proving they have access to these
-	// policies.
-	AllowUnauthenticated *bool `hcl:"allow_unauthenticated"`
-
-	// TaskTokenTTL is the TTL of the tokens created by Nomad Servers and used
-	// by the client.  There should be a minimum time value such that the client
-	// does not have to renew with Vault at a very high frequency
-	TaskTokenTTL string `hcl:"task_token_ttl"`
-
 	// Addr is the address of the local Vault agent. This should be a complete
 	// URL such as "http://vault.example.com"
-	Addr string `hcl:"address"`
+	Addr string `mapstructure:"address"`
+
+	// JWTAuthBackendPath is the path used to access the JWT auth method.
+	JWTAuthBackendPath string `mapstructure:"jwt_auth_backend_path"`
 
 	// ConnectionRetryIntv is the interval to wait before re-attempting to
 	// connect to Vault.
@@ -62,70 +70,78 @@ type VaultConfig struct {
 
 	// TLSCaFile is the path to a PEM-encoded CA cert file to use to verify the
 	// Vault server SSL certificate.
-	TLSCaFile string `hcl:"ca_file"`
+	TLSCaFile string `mapstructure:"ca_file"`
 
 	// TLSCaFile is the path to a directory of PEM-encoded CA cert files to
 	// verify the Vault server SSL certificate.
-	TLSCaPath string `hcl:"ca_path"`
+	TLSCaPath string `mapstructure:"ca_path"`
 
 	// TLSCertFile is the path to the certificate for Vault communication
-	TLSCertFile string `hcl:"cert_file"`
+	TLSCertFile string `mapstructure:"cert_file"`
 
 	// TLSKeyFile is the path to the private key for Vault communication
-	TLSKeyFile string `hcl:"key_file"`
+	TLSKeyFile string `mapstructure:"key_file"`
 
 	// TLSSkipVerify enables or disables SSL verification
-	TLSSkipVerify *bool `hcl:"tls_skip_verify"`
+	TLSSkipVerify *bool `mapstructure:"tls_skip_verify"`
 
 	// TLSServerName, if set, is used to set the SNI host when connecting via TLS.
-	TLSServerName string `hcl:"tls_server_name"`
+	TLSServerName string `mapstructure:"tls_server_name"`
+
+	// Servers-only fields.
+
+	// DefaultIdentity is the default workload identity configuration used when
+	// a job has a `vault` block but no `identity` named "vault_<name>", where
+	// <name> matches this block `name` parameter.
+	DefaultIdentity *WorkloadIdentityConfig `mapstructure:"default_identity"`
+
+	// Token is used by the Vault Transit Keyring implementation only. It was
+	// previously used by the now removed Nomad server derive child token
+	// workflow.
+	Token string `mapstructure:"token"`
 }
 
 // DefaultVaultConfig returns the canonical defaults for the Nomad
 // `vault` configuration.
 func DefaultVaultConfig() *VaultConfig {
 	return &VaultConfig{
-		Addr:                 "https://vault.service.consul:8200",
-		ConnectionRetryIntv:  DefaultVaultConnectRetryIntv,
-		AllowUnauthenticated: pointer.Of(true),
+		Name:                "default",
+		Addr:                "https://vault.service.consul:8200",
+		JWTAuthBackendPath:  "jwt-nomad",
+		ConnectionRetryIntv: DefaultVaultConnectRetryIntv,
 	}
 }
 
 // IsEnabled returns whether the config enables Vault integration
 func (c *VaultConfig) IsEnabled() bool {
+	if c == nil {
+		return false
+	}
 	return c.Enabled != nil && *c.Enabled
-}
-
-// AllowsUnauthenticated returns whether the config allows unauthenticated
-// access to Vault
-func (c *VaultConfig) AllowsUnauthenticated() bool {
-	return c.AllowUnauthenticated != nil && *c.AllowUnauthenticated
 }
 
 // Merge merges two Vault configurations together.
 func (c *VaultConfig) Merge(b *VaultConfig) *VaultConfig {
 	result := *c
 
+	if b.Name != "" {
+		result.Name = b.Name
+	}
 	if b.Enabled != nil {
 		result.Enabled = b.Enabled
-	}
-	if b.Token != "" {
-		result.Token = b.Token
 	}
 	if b.Role != "" {
 		result.Role = b.Role
 	}
+
 	if b.Namespace != "" {
 		result.Namespace = b.Namespace
 	}
-	if b.AllowUnauthenticated != nil {
-		result.AllowUnauthenticated = b.AllowUnauthenticated
-	}
-	if b.TaskTokenTTL != "" {
-		result.TaskTokenTTL = b.TaskTokenTTL
-	}
 	if b.Addr != "" {
 		result.Addr = b.Addr
+	}
+	if b.JWTAuthBackendPath != "" {
+		result.JWTAuthBackendPath = b.JWTAuthBackendPath
 	}
 	if b.ConnectionRetryIntv.Nanoseconds() != 0 {
 		result.ConnectionRetryIntv = b.ConnectionRetryIntv
@@ -147,6 +163,13 @@ func (c *VaultConfig) Merge(b *VaultConfig) *VaultConfig {
 	}
 	if b.TLSServerName != "" {
 		result.TLSServerName = b.TLSServerName
+	}
+
+	if result.DefaultIdentity == nil && b.DefaultIdentity != nil {
+		sID := *b.DefaultIdentity
+		result.DefaultIdentity = &sID
+	} else if b.DefaultIdentity != nil {
+		result.DefaultIdentity = result.DefaultIdentity.Merge(b.DefaultIdentity)
 	}
 
 	return &result
@@ -188,14 +211,9 @@ func (c *VaultConfig) Copy() *VaultConfig {
 	return nc
 }
 
-// Equal is a rename of Equals.
-func (c *VaultConfig) Equal(b *VaultConfig) bool {
-	return c.Equals(b)
-}
-
-// Equals compares two Vault configurations and returns a boolean indicating
+// Equal compares two Vault configurations and returns a boolean indicating
 // if they are equal.
-func (c *VaultConfig) Equals(b *VaultConfig) bool {
+func (c *VaultConfig) Equal(b *VaultConfig) bool {
 	if c == nil && b != nil {
 		return false
 	}
@@ -203,36 +221,23 @@ func (c *VaultConfig) Equals(b *VaultConfig) bool {
 		return false
 	}
 
-	if c.Enabled == nil || b.Enabled == nil {
-		if c.Enabled != b.Enabled {
-			return false
-		}
-	} else if *c.Enabled != *b.Enabled {
+	if c.Name != b.Name {
 		return false
 	}
-
-	if c.Token != b.Token {
+	if !pointer.Eq(c.Enabled, b.Enabled) {
 		return false
 	}
 	if c.Role != b.Role {
 		return false
 	}
+
 	if c.Namespace != b.Namespace {
 		return false
 	}
-
-	if c.AllowUnauthenticated == nil || b.AllowUnauthenticated == nil {
-		if c.AllowUnauthenticated != b.AllowUnauthenticated {
-			return false
-		}
-	} else if *c.AllowUnauthenticated != *b.AllowUnauthenticated {
-		return false
-	}
-
-	if c.TaskTokenTTL != b.TaskTokenTTL {
-		return false
-	}
 	if c.Addr != b.Addr {
+		return false
+	}
+	if c.JWTAuthBackendPath != b.JWTAuthBackendPath {
 		return false
 	}
 	if c.ConnectionRetryIntv.Nanoseconds() != b.ConnectionRetryIntv.Nanoseconds() {
@@ -250,16 +255,14 @@ func (c *VaultConfig) Equals(b *VaultConfig) bool {
 	if c.TLSKeyFile != b.TLSKeyFile {
 		return false
 	}
-
-	if c.TLSSkipVerify == nil || b.TLSSkipVerify == nil {
-		if c.TLSSkipVerify != b.TLSSkipVerify {
-			return false
-		}
-	} else if *c.TLSSkipVerify != *b.TLSSkipVerify {
+	if !pointer.Eq(c.TLSSkipVerify, b.TLSSkipVerify) {
+		return false
+	}
+	if c.TLSServerName != b.TLSServerName {
 		return false
 	}
 
-	if c.TLSServerName != b.TLSServerName {
+	if !c.DefaultIdentity.Equal(b.DefaultIdentity) {
 		return false
 	}
 

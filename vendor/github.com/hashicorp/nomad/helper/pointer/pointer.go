@@ -1,14 +1,15 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 // Package pointer provides helper functions related to Go pointers.
 package pointer
 
-import (
-	"golang.org/x/exp/constraints"
-)
+import "cmp"
 
 // Primitive represents basic types that are safe to do basic comparisons by
 // pointer dereference (checking nullity first).
 type Primitive interface {
-	constraints.Ordered | bool
+	cmp.Ordered | bool
 }
 
 // Of returns a pointer to a.
@@ -37,7 +38,7 @@ func Merge[P Primitive](previous, next *P) *P {
 //
 // May only be used on pointers to primitive types, where the comparison is
 // guaranteed to be sensible. For complex types (i.e. structs) consider implementing
-// an Equals method.
+// an Equal method.
 func Eq[P Primitive](a, b *P) bool {
 	if a == nil || b == nil {
 		return a == b

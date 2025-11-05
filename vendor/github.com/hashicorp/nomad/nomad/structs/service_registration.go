@@ -1,13 +1,16 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package structs
 
 import (
 	"crypto/md5"
 	"encoding/binary"
 	"fmt"
+	"slices"
 
 	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/helper/ipaddr"
-	"golang.org/x/exp/slices"
 )
 
 const (
@@ -106,9 +109,9 @@ func (s *ServiceRegistration) Copy() *ServiceRegistration {
 	return ns
 }
 
-// Equals performs an equality check on the two service registrations. It
+// Equal performs an equality check on the two service registrations. It
 // handles nil objects.
-func (s *ServiceRegistration) Equals(o *ServiceRegistration) bool {
+func (s *ServiceRegistration) Equal(o *ServiceRegistration) bool {
 	if s == nil || o == nil {
 		return s == o
 	}
@@ -172,6 +175,11 @@ func (s *ServiceRegistration) GetNamespace() string {
 		return ""
 	}
 	return s.Namespace
+}
+
+// Stub implements support for pagination
+func (s *ServiceRegistration) Stub() (*ServiceRegistration, error) {
+	return s, nil
 }
 
 // HashWith generates a unique value representative of s based on the contents of s.

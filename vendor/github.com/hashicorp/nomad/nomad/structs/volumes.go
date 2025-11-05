@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package structs
 
 import (
@@ -8,28 +11,38 @@ import (
 
 const (
 	VolumeTypeHost = "host"
-)
 
-const (
 	VolumeMountPropagationPrivate       = "private"
 	VolumeMountPropagationHostToTask    = "host-to-task"
 	VolumeMountPropagationBidirectional = "bidirectional"
+
+	SELinuxSharedVolume  = "z"
+	SELinuxPrivateVolume = "Z"
 )
 
-func MountPropagationModeIsValid(propagationMode string) bool {
-	switch propagationMode {
-	case "", VolumeMountPropagationPrivate, VolumeMountPropagationHostToTask, VolumeMountPropagationBidirectional:
-		return true
-	default:
-		return false
-	}
-}
+var (
+	errVolMountInvalidPropagationMode = fmt.Errorf("volume mount has an invalid propagation mode")
+	errVolMountInvalidSELinuxLabel    = fmt.Errorf("volume mount has an invalid SELinux label")
+	errVolMountEmptyVol               = fmt.Errorf("volume mount references an empty volume")
+)
 
 // ClientHostVolumeConfig is used to configure access to host paths on a Nomad Client
 type ClientHostVolumeConfig struct {
 	Name     string `hcl:",key"`
 	Path     string `hcl:"path"`
 	ReadOnly bool   `hcl:"read_only"`
+	// ID is set for dynamic host volumes only.
+	ID string `hcl:"-"`
+}
+
+func (p *ClientHostVolumeConfig) Equal(o *ClientHostVolumeConfig) bool {
+	if p == nil && o == nil {
+		return true
+	}
+	if p == nil || o == nil {
+		return false
+	}
+	return *p == *o
 }
 
 func (p *ClientHostVolumeConfig) Copy() *ClientHostVolumeConfig {
@@ -90,16 +103,45 @@ func HostVolumeSliceMerge(a, b []*ClientHostVolumeConfig) []*ClientHostVolumeCon
 	return n
 }
 
-// VolumeRequest is a representation of a storage volume that a TaskGroup wishes to use.
+// VolumeRequest is a representation of a storage volume that a TaskGroup wishes
+// to use.
 type VolumeRequest struct {
 	Name           string
 	Type           string
 	Source         string
 	ReadOnly       bool
-	AccessMode     CSIVolumeAccessMode
-	AttachmentMode CSIVolumeAttachmentMode
+	Sticky         bool
+	AccessMode     VolumeAccessMode
+	AttachmentMode VolumeAttachmentMode
 	MountOptions   *CSIMountOptions
 	PerAlloc       bool
+}
+
+func (v *VolumeRequest) Equal(o *VolumeRequest) bool {
+	if v == nil || o == nil {
+		return v == o
+	}
+	switch {
+	case v.Name != o.Name:
+		return false
+	case v.Type != o.Type:
+		return false
+	case v.Source != o.Source:
+		return false
+	case v.ReadOnly != o.ReadOnly:
+		return false
+	case v.Sticky != o.Sticky:
+		return false
+	case v.AccessMode != o.AccessMode:
+		return false
+	case v.AttachmentMode != o.AttachmentMode:
+		return false
+	case !v.MountOptions.Equal(o.MountOptions):
+		return false
+	case v.PerAlloc != o.PerAlloc:
+		return false
+	}
+	return true
 }
 
 func (v *VolumeRequest) Validate(jobType string, taskGroupCount, canaries int) error {
@@ -116,21 +158,39 @@ func (v *VolumeRequest) Validate(jobType string, taskGroupCount, canaries int) e
 	if v.Source == "" {
 		addErr("volume has an empty source")
 	}
+	if v.PerAlloc {
+		if jobType == JobTypeSystem || jobType == JobTypeSysBatch {
+			addErr("volume cannot be per_alloc for system or sysbatch jobs")
+		}
+		if canaries > 0 {
+			addErr("volume cannot be per_alloc when canaries are in use")
+		}
+		if v.Sticky {
+			addErr("volume cannot be per_alloc and sticky at the same time")
+		}
+	}
 
 	switch v.Type {
 
 	case VolumeTypeHost:
-		if v.AttachmentMode != CSIVolumeAttachmentModeUnknown {
-			addErr("host volumes cannot have an attachment mode")
-		}
-		if v.AccessMode != CSIVolumeAccessModeUnknown {
-			addErr("host volumes cannot have an access mode")
-		}
 		if v.MountOptions != nil {
 			addErr("host volumes cannot have mount options")
 		}
-		if v.PerAlloc {
-			addErr("host volumes do not support per_alloc")
+
+		switch v.AccessMode {
+		case HostVolumeAccessModeSingleNodeReader:
+			if !v.ReadOnly {
+				addErr("%s volumes must be read-only", v.AccessMode)
+			}
+		case HostVolumeAccessModeSingleNodeWriter,
+			HostVolumeAccessModeSingleNodeSingleWriter,
+			HostVolumeAccessModeSingleNodeMultiWriter,
+			HostVolumeAccessModeUnknown:
+			// dynamic host volumes are all "per node" so there's no way to
+			// validate that other access modes work for a given volume until we
+			// have access to other allocations (in the scheduler)
+		default:
+			addErr("host volumes cannot be mounted with %s access mode")
 		}
 
 	case VolumeTypeCSI:
@@ -170,15 +230,6 @@ func (v *VolumeRequest) Validate(jobType string, taskGroupCount, canaries int) e
 		case CSIVolumeAccessModeMultiNodeMultiWriter:
 			// note: we intentionally allow read-only mount of this mode
 		}
-		if v.PerAlloc {
-			if jobType == JobTypeSystem || jobType == JobTypeSysBatch {
-				addErr("volume cannot be per_alloc for system or sysbatch jobs")
-			}
-			if canaries > 0 {
-				addErr("volume cannot be per_alloc when canaries are in use")
-			}
-		}
-
 	}
 
 	return mErr.ErrorOrNil()
@@ -219,6 +270,14 @@ func CopyMapVolumeRequest(s map[string]*VolumeRequest) map[string]*VolumeRequest
 	return c
 }
 
+// VolumeAttachmentMode chooses the type of storage api that will be used to
+// interact with the device.
+type VolumeAttachmentMode string
+
+// VolumeAccessMode indicates how a volume should be used in a storage topology
+// e.g whether the provider should make the volume available concurrently.
+type VolumeAccessMode string
+
 // VolumeMount represents the relationship between a destination path in a task
 // and the task group volume that should be mounted there.
 type VolumeMount struct {
@@ -226,6 +285,32 @@ type VolumeMount struct {
 	Destination     string
 	ReadOnly        bool
 	PropagationMode string
+	SELinuxLabel    string
+}
+
+// Hash is a very basic string based implementation of a hasher.
+func (v *VolumeMount) Hash() string {
+	return fmt.Sprintf("%#+v", v)
+}
+
+func (v *VolumeMount) Equal(o *VolumeMount) bool {
+	if v == nil || o == nil {
+		return v == o
+	}
+	switch {
+	case v.Volume != o.Volume:
+		return false
+	case v.Destination != o.Destination:
+		return false
+	case v.ReadOnly != o.ReadOnly:
+		return false
+	case v.PropagationMode != o.PropagationMode:
+		return false
+	case v.SELinuxLabel != o.SELinuxLabel:
+		return false
+	}
+
+	return true
 }
 
 func (v *VolumeMount) Copy() *VolumeMount {
@@ -236,6 +321,43 @@ func (v *VolumeMount) Copy() *VolumeMount {
 	nv := new(VolumeMount)
 	*nv = *v
 	return nv
+}
+
+func (v *VolumeMount) Validate() error {
+	var mErr *multierror.Error
+
+	// Validate the task does not reference undefined volume mounts
+	if v.Volume == "" {
+		mErr = multierror.Append(mErr, errVolMountEmptyVol)
+	}
+
+	if !v.MountPropagationModeIsValid() {
+		mErr = multierror.Append(mErr, fmt.Errorf("%w: %q", errVolMountInvalidPropagationMode, v.PropagationMode))
+	}
+
+	if !v.SELinuxLabelIsValid() {
+		mErr = multierror.Append(mErr, fmt.Errorf("%w: \"%s\"", errVolMountInvalidSELinuxLabel, v.SELinuxLabel))
+	}
+
+	return mErr.ErrorOrNil()
+}
+
+func (v *VolumeMount) MountPropagationModeIsValid() bool {
+	switch v.PropagationMode {
+	case "", VolumeMountPropagationPrivate, VolumeMountPropagationHostToTask, VolumeMountPropagationBidirectional:
+		return true
+	default:
+		return false
+	}
+}
+
+func (v *VolumeMount) SELinuxLabelIsValid() bool {
+	switch v.SELinuxLabel {
+	case "", SELinuxSharedVolume, SELinuxPrivateVolume:
+		return true
+	default:
+		return false
+	}
 }
 
 func CopySliceVolumeMount(s []*VolumeMount) []*VolumeMount {

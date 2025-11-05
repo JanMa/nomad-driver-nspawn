@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package logmon
 
 import (
@@ -195,7 +198,7 @@ func (l *logRotatorWrapper) isRunning() bool {
 // newLogRotatorWrapper takes a rotator and returns a wrapper that has the
 // processOutWriter to attach to the stdout or stderr of a process.
 func newLogRotatorWrapper(path string, logger hclog.Logger, rotator io.WriteCloser) (*logRotatorWrapper, error) {
-	logger.Info("opening fifo", "path", path)
+	logger.Debug("opening fifo", "path", path)
 
 	var openFn func() (io.ReadCloser, error)
 	var err error

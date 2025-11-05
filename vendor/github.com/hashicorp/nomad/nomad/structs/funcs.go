@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package structs
 
 import (
@@ -10,38 +13,10 @@ import (
 	"strconv"
 	"strings"
 
-	multierror "github.com/hashicorp/go-multierror"
-	"github.com/hashicorp/go-set"
-	lru "github.com/hashicorp/golang-lru"
+	"github.com/hashicorp/go-set/v3"
 	"github.com/hashicorp/nomad/acl"
 	"golang.org/x/crypto/blake2b"
 )
-
-// MergeMultierrorWarnings takes job warnings and canonicalize warnings and
-// merges them into a returnable string. Both the errors may be nil.
-func MergeMultierrorWarnings(errs ...error) string {
-	if len(errs) == 0 {
-		return ""
-	}
-
-	var mErr multierror.Error
-	_ = multierror.Append(&mErr, errs...)
-	mErr.ErrorFormat = warningsFormatter
-
-	return mErr.Error()
-}
-
-// warningsFormatter is used to format job warnings
-func warningsFormatter(es []error) string {
-	sb := strings.Builder{}
-	sb.WriteString(fmt.Sprintf("%d warning(s):\n", len(es)))
-
-	for i := range es {
-		sb.WriteString(fmt.Sprintf("\n* %s", es[i]))
-	}
-
-	return sb.String()
-}
 
 // RemoveAllocs is used to remove any allocs with the given IDs
 // from the list of allocations
@@ -166,9 +141,16 @@ func (a TerminalByNodeByName) Get(nodeID, name string) (*Allocation, bool) {
 func AllocsFit(node *Node, allocs []*Allocation, netIdx *NetworkIndex, checkDevices bool) (bool, string, *ComparableResources, error) {
 	// Compute the allocs' utilization from zero
 	used := new(ComparableResources)
-
+	if node.NodeMaxAllocs != 0 {
+		if node.NodeMaxAllocs < len(allocs) {
+			return false, "max allocation exceeded", used, fmt.Errorf("plan exceeds max allocation")
+		}
+	}
 	reservedCores := map[uint16]struct{}{}
 	var coreOverlap bool
+
+	hostVolumeClaims := map[string]int{}
+	exclusiveHostVolumeClaims := []string{}
 
 	// For each alloc, add the resources
 	for _, alloc := range allocs {
@@ -177,7 +159,7 @@ func AllocsFit(node *Node, allocs []*Allocation, netIdx *NetworkIndex, checkDevi
 			continue
 		}
 
-		cr := alloc.ComparableResources()
+		cr := alloc.AllocatedResources.Comparable()
 		used.Add(cr)
 
 		// Adding the comparable resource unions reserved core sets, need to check if reserved cores overlap
@@ -188,6 +170,18 @@ func AllocsFit(node *Node, allocs []*Allocation, netIdx *NetworkIndex, checkDevi
 				reservedCores[core] = struct{}{}
 			}
 		}
+
+		// Job will be nil in the scheduler, where we're not performing this check anyways
+		if checkDevices && alloc.Job != nil {
+			group := alloc.Job.LookupTaskGroup(alloc.TaskGroup)
+			for _, volReq := range group.Volumes {
+				hostVolumeClaims[volReq.Source]++
+				if volReq.AccessMode ==
+					HostVolumeAccessModeSingleNodeSingleWriter {
+					exclusiveHostVolumeClaims = append(exclusiveHostVolumeClaims, volReq.Source)
+				}
+			}
+		}
 	}
 
 	if coreOverlap {
@@ -196,8 +190,8 @@ func AllocsFit(node *Node, allocs []*Allocation, netIdx *NetworkIndex, checkDevi
 
 	// Check that the node resources (after subtracting reserved) are a
 	// super set of those that are being allocated
-	available := node.ComparableResources()
-	available.Subtract(node.ComparableReservedResources())
+	available := node.NodeResources.Comparable()
+	available.Subtract(node.ReservedResources.Comparable())
 	if superset, dimension := available.Superset(used); !superset {
 		return false, dimension, used, nil
 	}
@@ -223,11 +217,17 @@ func AllocsFit(node *Node, allocs []*Allocation, netIdx *NetworkIndex, checkDevi
 		return false, "bandwidth exceeded", used, nil
 	}
 
-	// Check devices
+	// Check devices and host volumes
 	if checkDevices {
 		accounter := NewDeviceAccounter(node)
 		if accounter.AddAllocs(allocs) {
 			return false, "device oversubscribed", used, nil
+		}
+
+		for _, exclusiveClaim := range exclusiveHostVolumeClaims {
+			if hostVolumeClaims[exclusiveClaim] > 1 {
+				return false, "conflicting claims for host volume with single-writer", used, nil
+			}
 		}
 	}
 
@@ -236,9 +236,8 @@ func AllocsFit(node *Node, allocs []*Allocation, netIdx *NetworkIndex, checkDevi
 }
 
 func computeFreePercentage(node *Node, util *ComparableResources) (freePctCpu, freePctRam float64) {
-	// COMPAT(0.11): Remove in 0.11
-	reserved := node.ComparableReservedResources()
-	res := node.ComparableResources()
+	reserved := node.ReservedResources.Comparable()
+	res := node.NodeResources.Comparable()
 
 	// Determine the node availability
 	nodeCpu := float64(res.Flattened.Cpu.CpuShares)
@@ -364,32 +363,18 @@ func CopySliceNodeScoreMeta(s []*NodeScoreMeta) []*NodeScoreMeta {
 	return c
 }
 
-// VaultPoliciesSet takes the structure returned by VaultPolicies and returns
-// the set of required policies
-func VaultPoliciesSet(policies map[string]map[string]*Vault) []string {
+// VaultNamespaceSet takes the structure returned by job.Vault() and returns a
+// set of required namespaces.
+func VaultNamespaceSet(blocks map[string]map[string]*Vault) []string {
 	s := set.New[string](10)
-	for _, tgp := range policies {
-		for _, tp := range tgp {
-			if tp != nil {
-				s.InsertAll(tp.Policies)
+	for _, taskGroupVault := range blocks {
+		for _, taskVault := range taskGroupVault {
+			if taskVault != nil && taskVault.Namespace != "" {
+				s.Insert(taskVault.Namespace)
 			}
 		}
 	}
-	return s.List()
-}
-
-// VaultNamespaceSet takes the structure returned by VaultPolicies and
-// returns a set of required namespaces
-func VaultNamespaceSet(policies map[string]map[string]*Vault) []string {
-	s := set.New[string](10)
-	for _, tgp := range policies {
-		for _, tp := range tgp {
-			if tp != nil && tp.Namespace != "" {
-				s.Insert(tp.Namespace)
-			}
-		}
-	}
-	return s.List()
+	return s.Slice()
 }
 
 // DenormalizeAllocationJobs is used to attach a job to all allocations that are
@@ -436,7 +421,7 @@ func ACLPolicyListHash(policies []*ACLPolicy) string {
 }
 
 // CompileACLObject compiles a set of ACL policies into an ACL object with a cache
-func CompileACLObject(cache *lru.TwoQueueCache, policies []*ACLPolicy) (*acl.ACL, error) {
+func CompileACLObject(cache *ACLCache[*acl.ACL], policies []*ACLPolicy) (*acl.ACL, error) {
 	// Sort the policies to ensure consistent ordering
 	sort.Slice(policies, func(i, j int) bool {
 		return policies[i].Name < policies[j].Name
@@ -444,9 +429,9 @@ func CompileACLObject(cache *lru.TwoQueueCache, policies []*ACLPolicy) (*acl.ACL
 
 	// Determine the cache key
 	cacheKey := ACLPolicyListHash(policies)
-	aclRaw, ok := cache.Get(cacheKey)
+	entry, ok := cache.Get(cacheKey)
 	if ok {
-		return aclRaw.(*acl.ACL), nil
+		return entry.Get(), nil
 	}
 
 	// Parse the policies

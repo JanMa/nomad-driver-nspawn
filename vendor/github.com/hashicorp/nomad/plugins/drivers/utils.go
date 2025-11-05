@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package drivers
 
 import (
@@ -291,6 +294,7 @@ func MountFromProto(mount *proto.Mount) *MountConfig {
 		HostPath:        mount.HostPath,
 		Readonly:        mount.Readonly,
 		PropagationMode: mount.PropagationMode,
+		SELinuxLabel:    mount.SelinuxLabel,
 	}
 }
 
@@ -342,6 +346,7 @@ func MountToProto(mount *MountConfig) *proto.Mount {
 		HostPath:        mount.HostPath,
 		Readonly:        mount.Readonly,
 		PropagationMode: mount.PropagationMode,
+		SelinuxLabel:    mount.SELinuxLabel,
 	}
 }
 
