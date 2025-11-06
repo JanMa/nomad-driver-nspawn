@@ -21,13 +21,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
 	"sync"
 
-	"github.com/google/go-containerregistry/internal/gzip"
+	comp "github.com/google/go-containerregistry/internal/compression"
+	"github.com/google/go-containerregistry/pkg/compression"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/partial"
@@ -68,6 +68,22 @@ func pathOpener(path string) Opener {
 // ImageFromPath returns a v1.Image from a tarball located on path.
 func ImageFromPath(path string, tag *name.Tag) (v1.Image, error) {
 	return Image(pathOpener(path), tag)
+}
+
+// LoadManifest load manifest
+func LoadManifest(opener Opener) (Manifest, error) {
+	m, err := extractFileFromTar(opener, "manifest.json")
+	if err != nil {
+		return nil, err
+	}
+	defer m.Close()
+
+	var manifest Manifest
+
+	if err := json.NewDecoder(m).Decode(&manifest); err != nil {
+		return nil, err
+	}
+	return manifest, nil
 }
 
 // Image exposes an image from the tarball at the provided path.
@@ -150,7 +166,13 @@ func (i *image) areLayersCompressed() (bool, error) {
 		return false, err
 	}
 	defer blob.Close()
-	return gzip.Is(blob)
+
+	cp, _, err := comp.PeekCompression(blob)
+	if err != nil {
+		return false, err
+	}
+
+	return cp != compression.None, nil
 }
 
 func (i *image) loadTarDescriptorAndConfig() error {
@@ -179,7 +201,7 @@ func (i *image) loadTarDescriptorAndConfig() error {
 	}
 	defer cfg.Close()
 
-	i.config, err = ioutil.ReadAll(cfg)
+	i.config, err = io.ReadAll(cfg)
 	if err != nil {
 		return err
 	}
@@ -211,7 +233,7 @@ func extractFileFromTar(opener Opener, filePath string) (io.ReadCloser, error) {
 	tf := tar.NewReader(f)
 	for {
 		hdr, err := tf.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -220,7 +242,7 @@ func extractFileFromTar(opener Opener, filePath string) (io.ReadCloser, error) {
 		if hdr.Name == filePath {
 			if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
 				currentDir := filepath.Dir(filePath)
-				return extractFileFromTar(opener, path.Join(currentDir, hdr.Linkname))
+				return extractFileFromTar(opener, path.Join(currentDir, path.Clean(hdr.Linkname)))
 			}
 			close = false
 			return tarFile{
