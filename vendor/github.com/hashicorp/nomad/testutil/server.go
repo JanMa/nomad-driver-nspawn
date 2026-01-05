@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package testutil
 
 // TestServer is a test helper. It uses a fork/exec model to create
@@ -19,37 +22,54 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"testing"
 	"time"
 
 	cleanhttp "github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/nomad/ci"
 	"github.com/hashicorp/nomad/helper/discover"
-	testing "github.com/mitchellh/go-testing-interface"
+	"github.com/hashicorp/nomad/helper/pointer"
+	"github.com/shoenig/test/must"
 )
 
 // TestServerConfig is the main server configuration struct.
 type TestServerConfig struct {
-	NodeName          string        `json:"name,omitempty"`
-	DataDir           string        `json:"data_dir,omitempty"`
-	Region            string        `json:"region,omitempty"`
-	DisableCheckpoint bool          `json:"disable_update_check"`
-	LogLevel          string        `json:"log_level,omitempty"`
-	Consul            *Consul       `json:"consul,omitempty"`
-	AdvertiseAddrs    *Advertise    `json:"advertise,omitempty"`
-	Ports             *PortsConfig  `json:"ports,omitempty"`
-	Server            *ServerConfig `json:"server,omitempty"`
-	Client            *ClientConfig `json:"client,omitempty"`
-	Vault             *VaultConfig  `json:"vault,omitempty"`
-	ACL               *ACLConfig    `json:"acl,omitempty"`
-	DevMode           bool          `json:"-"`
-	Stdout, Stderr    io.Writer     `json:"-"`
+	NodeName          string         `json:"name,omitempty"`
+	DataDir           string         `json:"data_dir,omitempty"`
+	Region            string         `json:"region,omitempty"`
+	DisableCheckpoint bool           `json:"disable_update_check"`
+	LogLevel          string         `json:"log_level,omitempty"`
+	Consuls           []*Consul      `json:"consul,omitempty"`
+	AdvertiseAddrs    *Advertise     `json:"advertise,omitempty"`
+	Ports             *PortsConfig   `json:"ports,omitempty"`
+	Server            *ServerConfig  `json:"server,omitempty"`
+	Client            *ClientConfig  `json:"client,omitempty"`
+	Vaults            []*VaultConfig `json:"vault,omitempty"`
+	ACL               *ACLConfig     `json:"acl,omitempty"`
+	DevMode           bool           `json:"-"`
+	DevConnectMode    bool           `json:"-"`
+	Stdout, Stderr    io.Writer      `json:"-"`
 }
 
 // Consul is used to configure the communication with Consul
 type Consul struct {
-	Address string `json:"address,omitempty"`
-	Auth    string `json:"auth,omitempty"`
-	Token   string `json:"token,omitempty"`
+	Name                      string                  `json:"name,omitempty"`
+	Address                   string                  `json:"address,omitempty"`
+	Auth                      string                  `json:"auth,omitempty"`
+	Token                     string                  `json:"token,omitempty"`
+	ServiceIdentity           *WorkloadIdentityConfig `json:"service_identity,omitempty"`
+	ServiceIdentityAuthMethod string                  `json:"service_auth_method,omitempty"`
+	TaskIdentity              *WorkloadIdentityConfig `json:"task_identity,omitempty"`
+	TaskIdentityAuthMethod    string                  `json:"task_auth_method,omitempty"`
+}
+
+// WorkloadIdentityConfig is the configuration for default workload identities.
+type WorkloadIdentityConfig struct {
+	Audience    []string          `json:"aud"`
+	Env         bool              `json:"env"`
+	File        bool              `json:"file"`
+	TTL         string            `json:"ttl"`
+	ExtraClaims map[string]string `json:"extra_claims,omitempty"`
 }
 
 // Advertise is used to configure the addresses to advertise
@@ -75,20 +95,26 @@ type ServerConfig struct {
 
 // ClientConfig is used to configure the client
 type ClientConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled      bool `json:"enabled"`
+	TotalCompute int  `json:"cpu_total_compute"`
 }
 
 // VaultConfig is used to configure Vault
 type VaultConfig struct {
-	Enabled              bool   `json:"enabled"`
-	Address              string `json:"address"`
-	AllowUnauthenticated bool   `json:"allow_unauthenticated"`
-	Token                string `json:"token"`
+	Name                 string                  `json:"name,omitempty"`
+	Enabled              bool                    `json:"enabled"`
+	Address              string                  `json:"address"`
+	AllowUnauthenticated *bool                   `json:"allow_unauthenticated,omitempty"`
+	Token                string                  `json:"token,omitempty"`
+	Role                 string                  `json:"role,omitempty"`
+	JWTAuthBackendPath   string                  `json:"jwt_auth_backend_path,omitempty"`
+	DefaultIdentity      *WorkloadIdentityConfig `json:"default_identity,omitempty"`
 }
 
 // ACLConfig is used to configure ACLs
 type ACLConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled        bool   `json:"enabled"`
+	BootstrapToken string `json:"-"` // not in the real config
 }
 
 // ServerConfigCallback is a function interface which can be
@@ -115,10 +141,10 @@ func defaultServerConfig() *TestServerConfig {
 		Client: &ClientConfig{
 			Enabled: false,
 		},
-		Vault: &VaultConfig{
+		Vaults: []*VaultConfig{{
 			Enabled:              false,
-			AllowUnauthenticated: true,
-		},
+			AllowUnauthenticated: pointer.Of(true),
+		}},
 		ACL: &ACLConfig{
 			Enabled: false,
 		},
@@ -129,7 +155,7 @@ func defaultServerConfig() *TestServerConfig {
 type TestServer struct {
 	cmd    *exec.Cmd
 	Config *TestServerConfig
-	t      testing.T
+	t      testing.TB
 
 	HTTPAddr   string
 	SerfAddr   string
@@ -138,7 +164,7 @@ type TestServer struct {
 
 // NewTestServer creates a new TestServer, and makes a call to
 // an optional callback function to modify the configuration.
-func NewTestServer(t testing.T, cb ServerConfigCallback) *TestServer {
+func NewTestServer(t testing.TB, cb ServerConfigCallback) *TestServer {
 	path, err := discover.NomadExecutable()
 	if err != nil {
 		t.Skipf("nomad not found, skipping: %v", err)
@@ -151,6 +177,8 @@ func NewTestServer(t testing.T, cb ServerConfigCallback) *TestServer {
 	if err := vcmd.Run(); err != nil {
 		t.Skipf("nomad version failed: %v", err)
 	}
+	out, _ := vcmd.Output()
+	t.Logf("nomad version: %s", out)
 
 	dataDir, err := os.MkdirTemp("", "nomad")
 	if err != nil {
@@ -190,10 +218,14 @@ func NewTestServer(t testing.T, cb ServerConfigCallback) *TestServer {
 	if nomadConfig.Stderr != nil {
 		stderr = nomadConfig.Stderr
 	}
+	t.Logf("CONFIG JSON: %s", string(configContent))
 
 	args := []string{"agent", "-config", configFile.Name()}
 	if nomadConfig.DevMode {
 		args = append(args, "-dev")
+	}
+	if nomadConfig.DevConnectMode {
+		args = append(args, "-dev-connect")
 	}
 
 	// Start the server
@@ -218,9 +250,13 @@ func NewTestServer(t testing.T, cb ServerConfigCallback) *TestServer {
 
 	// Wait for the server to be ready
 	if nomadConfig.Server.Enabled && nomadConfig.Server.BootstrapExpect != 0 {
-		server.waitForLeader()
+		server.waitForServers()
 	} else {
 		server.waitForAPI()
+	}
+
+	if nomadConfig.ACL.Enabled && nomadConfig.ACL.BootstrapToken != "" {
+		server.bootstrapSelf()
 	}
 
 	// Wait for the client to be ready
@@ -233,21 +269,21 @@ func NewTestServer(t testing.T, cb ServerConfigCallback) *TestServer {
 // Stop stops the test Nomad server, and removes the Nomad data
 // directory once we are done.
 func (s *TestServer) Stop() {
-	defer os.RemoveAll(s.Config.DataDir)
+	s.t.Cleanup(func() {
+		_ = os.RemoveAll(s.Config.DataDir)
+	})
 
 	// wait for the process to exit to be sure that the data dir can be
 	// deleted on all platforms.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-
-		s.cmd.Wait()
+		_ = s.cmd.Wait()
 	}()
 
 	// kill and wait gracefully
-	if err := s.cmd.Process.Signal(os.Interrupt); err != nil {
-		s.t.Errorf("err: %s", err)
-	}
+	err := s.gracefulStop()
+	must.NoError(s.t, err)
 
 	select {
 	case <-done:
@@ -256,15 +292,37 @@ func (s *TestServer) Stop() {
 		s.t.Logf("timed out waiting for process to gracefully terminate")
 	}
 
-	if err := s.cmd.Process.Kill(); err != nil {
-		s.t.Errorf("err: %s", err)
-	}
+	err = s.cmd.Process.Kill()
+	must.NoError(s.t, err, must.Sprint("failed to kill process"))
+
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		s.t.Logf("timed out waiting for process to be killed")
 	}
 
+}
+
+// bootstrapSelf bootstraps the ACL system from the provided token.
+func (s *TestServer) bootstrapSelf() {
+
+	contentType := "application/json"
+
+	rootToken := s.Config.ACL.BootstrapToken
+	body := struct{ BootstrapSecret string }{rootToken}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		s.t.Fatalf("err: %s", err)
+	}
+
+	resp, err := s.HTTPClient.Post(s.url("/v1/acl/bootstrap"), contentType, bytes.NewBuffer(buf))
+	if err != nil {
+		s.t.Fatalf("err: %s", err)
+	}
+	defer resp.Body.Close()
+	if err := s.requireOK(resp); err != nil {
+		s.t.Fatalf("err: %s", err)
+	}
 }
 
 // waitForAPI waits for only the agent HTTP endpoint to start
@@ -288,20 +346,30 @@ func (s *TestServer) waitForAPI() {
 	})
 }
 
-// waitForLeader waits for the Nomad server's HTTP API to become
-// available, and then waits for a known leader and an index of
-// 1 or more to be observed to confirm leader election is done.
-func (s *TestServer) waitForLeader() {
+// waitForServers waits for the Nomad server's HTTP API to become available,
+// and then waits for the keyring to be intialized. This implies a leader has
+// been elected and Raft writes have occurred.
+func (s *TestServer) waitForServers() {
 	WaitForResult(func() (bool, error) {
 		// Query the API and check the status code
 		// Using this endpoint as it is does not have restricted access
-		resp, err := s.HTTPClient.Get(s.url("/v1/status/leader"))
+		resp, err := s.HTTPClient.Get(s.url("/.well-known/jwks.json"))
 		if err != nil {
 			return false, err
 		}
 		defer resp.Body.Close()
 		if err := s.requireOK(resp); err != nil {
 			return false, err
+		}
+
+		jwks := struct {
+			Keys []interface{} `json:"keys"`
+		}{}
+		if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+			return false, fmt.Errorf("error decoding jwks response: %w", err)
+		}
+		if len(jwks.Keys) == 0 {
+			return false, fmt.Errorf("no keys found")
 		}
 
 		return true, nil
@@ -319,7 +387,14 @@ func (s *TestServer) waitForClient() {
 	}
 
 	WaitForResult(func() (bool, error) {
-		resp, err := s.HTTPClient.Get(s.url("/v1/nodes"))
+		req, err := http.NewRequest(http.MethodGet, s.url("/v1/nodes"), nil)
+		if err != nil {
+			return false, err
+		}
+		if s.Config.ACL.BootstrapToken != "" {
+			req.Header.Set("X-Nomad-Token", s.Config.ACL.BootstrapToken)
+		}
+		resp, err := s.HTTPClient.Do(req)
 		if err != nil {
 			return false, err
 		}
@@ -357,7 +432,7 @@ func (s *TestServer) url(path string) string {
 
 // requireOK checks the HTTP response code and ensures it is acceptable.
 func (s *TestServer) requireOK(resp *http.Response) error {
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("Bad status code: %d", resp.StatusCode)
 	}
 	return nil
@@ -365,7 +440,7 @@ func (s *TestServer) requireOK(resp *http.Response) error {
 
 // put performs a new HTTP PUT request.
 func (s *TestServer) put(path string, body io.Reader) *http.Response {
-	req, err := http.NewRequest("PUT", s.url(path), body)
+	req, err := http.NewRequest(http.MethodPut, s.url(path), body)
 	if err != nil {
 		s.t.Fatalf("err: %s", err)
 	}

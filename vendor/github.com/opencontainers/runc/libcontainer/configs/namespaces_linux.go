@@ -3,6 +3,7 @@ package configs
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 )
 
@@ -14,6 +15,7 @@ const (
 	NEWIPC    NamespaceType = "NEWIPC"
 	NEWUSER   NamespaceType = "NEWUSER"
 	NEWCGROUP NamespaceType = "NEWCGROUP"
+	NEWTIME   NamespaceType = "NEWTIME"
 )
 
 var (
@@ -38,6 +40,8 @@ func NsName(ns NamespaceType) string {
 		return "uts"
 	case NEWCGROUP:
 		return "cgroup"
+	case NEWTIME:
+		return "time"
 	}
 	return ""
 }
@@ -56,6 +60,9 @@ func IsNamespaceSupported(ns NamespaceType) bool {
 	if nsFile == "" {
 		return false
 	}
+	// We don't need to use /proc/thread-self here because the list of
+	// namespace types is unrelated to the thread. This lets us avoid having to
+	// do runtime.LockOSThread.
 	_, err := os.Stat("/proc/self/ns/" + nsFile)
 	// a namespace is supported if it exists and we have permissions to read it
 	supported = err == nil
@@ -72,6 +79,7 @@ func NamespaceTypes() []NamespaceType {
 		NEWPID,
 		NEWNS,
 		NEWCGROUP,
+		NEWTIME,
 	}
 }
 
@@ -79,7 +87,7 @@ func NamespaceTypes() []NamespaceType {
 // alternate path that is able to be joined via setns.
 type Namespace struct {
 	Type NamespaceType `json:"type"`
-	Path string        `json:"path"`
+	Path string        `json:"path,omitempty"`
 }
 
 func (n *Namespace) GetPath(pid int) string {
@@ -91,7 +99,7 @@ func (n *Namespaces) Remove(t NamespaceType) bool {
 	if i == -1 {
 		return false
 	}
-	*n = append((*n)[:i], (*n)[i+1:]...)
+	*n = slices.Delete((*n), i, i+1)
 	return true
 }
 

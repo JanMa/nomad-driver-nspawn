@@ -12,9 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
+
+// cachedBootTime must be accessed via atomic.Load/StoreUint64
+var cachedBootTime uint64
 
 func DoSysctrl(mib string) ([]string, error) {
 	cmd := exec.Command("sysctl", "-n", mib)
@@ -31,7 +35,11 @@ func DoSysctrl(mib string) ([]string, error) {
 }
 
 func NumProcs() (uint64, error) {
-	f, err := os.Open(HostProc())
+	return NumProcsWithContext(context.Background())
+}
+
+func NumProcsWithContext(ctx context.Context) (uint64, error) {
+	f, err := os.Open(HostProcWithContext(ctx))
 	if err != nil {
 		return 0, err
 	}
@@ -52,23 +60,62 @@ func NumProcs() (uint64, error) {
 	return cnt, nil
 }
 
-func BootTimeWithContext(ctx context.Context) (uint64, error) {
+func BootTimeWithContext(ctx context.Context, enableCache bool) (uint64, error) {
+	if enableCache {
+		t := atomic.LoadUint64(&cachedBootTime)
+		if t != 0 {
+			return t, nil
+		}
+	}
+
 	system, role, err := VirtualizationWithContext(ctx)
 	if err != nil {
 		return 0, err
 	}
 
-	statFile := "stat"
+	useStatFile := true
 	if system == "lxc" && role == "guest" {
 		// if lxc, /proc/uptime is used.
-		statFile = "uptime"
+		useStatFile = false
 	} else if system == "docker" && role == "guest" {
 		// also docker, guest
-		statFile = "uptime"
+		useStatFile = false
 	}
 
-	filename := HostProc(statFile)
+	if useStatFile {
+		t, err := readBootTimeStat(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if enableCache {
+			atomic.StoreUint64(&cachedBootTime, t)
+		}
+	}
+
+	filename := HostProcWithContext(ctx, "uptime")
 	lines, err := ReadLines(filename)
+	if err != nil {
+		return handleBootTimeFileReadErr(err)
+	}
+	if len(lines) != 1 {
+		return 0, fmt.Errorf("wrong uptime format")
+	}
+	f := strings.Fields(lines[0])
+	b, err := strconv.ParseFloat(f[0], 64)
+	if err != nil {
+		return 0, err
+	}
+	currentTime := float64(time.Now().UnixNano()) / float64(time.Second)
+	t := currentTime - b
+
+	if enableCache {
+		atomic.StoreUint64(&cachedBootTime, uint64(t))
+	}
+
+	return uint64(t), nil
+}
+
+func handleBootTimeFileReadErr(err error) (uint64, error) {
 	if os.IsPermission(err) {
 		var info syscall.Sysinfo_t
 		err := syscall.Sysinfo(&info)
@@ -80,39 +127,27 @@ func BootTimeWithContext(ctx context.Context) (uint64, error) {
 		t := currentTime - int64(info.Uptime)
 		return uint64(t), nil
 	}
-	if err != nil {
-		return 0, err
-	}
+	return 0, err
+}
 
-	if statFile == "stat" {
-		for _, line := range lines {
-			if strings.HasPrefix(line, "btime") {
-				f := strings.Fields(line)
-				if len(f) != 2 {
-					return 0, fmt.Errorf("wrong btime format")
-				}
-				b, err := strconv.ParseInt(f[1], 10, 64)
-				if err != nil {
-					return 0, err
-				}
-				t := uint64(b)
-				return t, nil
-			}
+func readBootTimeStat(ctx context.Context) (uint64, error) {
+	filename := HostProcWithContext(ctx, "stat")
+	line, err := ReadLine(filename, "btime")
+	if err != nil {
+		return handleBootTimeFileReadErr(err)
+	}
+	if strings.HasPrefix(line, "btime") {
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			return 0, fmt.Errorf("wrong btime format")
 		}
-	} else if statFile == "uptime" {
-		if len(lines) != 1 {
-			return 0, fmt.Errorf("wrong uptime format")
-		}
-		f := strings.Fields(lines[0])
-		b, err := strconv.ParseFloat(f[0], 64)
+		b, err := strconv.ParseInt(f[1], 10, 64)
 		if err != nil {
 			return 0, err
 		}
-		currentTime := float64(time.Now().UnixNano()) / float64(time.Second)
-		t := currentTime - b
-		return uint64(t), nil
+		t := uint64(b)
+		return t, nil
 	}
-
 	return 0, fmt.Errorf("could not find btime")
 }
 
@@ -139,7 +174,7 @@ func VirtualizationWithContext(ctx context.Context) (string, string, error) {
 	}
 	cachedVirtMutex.RUnlock()
 
-	filename := HostProc("xen")
+	filename := HostProcWithContext(ctx, "xen")
 	if PathExists(filename) {
 		system = "xen"
 		role = "guest" // assume guest
@@ -154,7 +189,7 @@ func VirtualizationWithContext(ctx context.Context) (string, string, error) {
 		}
 	}
 
-	filename = HostProc("modules")
+	filename = HostProcWithContext(ctx, "modules")
 	if PathExists(filename) {
 		contents, err := ReadLines(filename)
 		if err == nil {
@@ -177,7 +212,7 @@ func VirtualizationWithContext(ctx context.Context) (string, string, error) {
 		}
 	}
 
-	filename = HostProc("cpuinfo")
+	filename = HostProcWithContext(ctx, "cpuinfo")
 	if PathExists(filename) {
 		contents, err := ReadLines(filename)
 		if err == nil {
@@ -190,7 +225,7 @@ func VirtualizationWithContext(ctx context.Context) (string, string, error) {
 		}
 	}
 
-	filename = HostProc("bus/pci/devices")
+	filename = HostProcWithContext(ctx, "bus/pci/devices")
 	if PathExists(filename) {
 		contents, err := ReadLines(filename)
 		if err == nil {
@@ -200,7 +235,7 @@ func VirtualizationWithContext(ctx context.Context) (string, string, error) {
 		}
 	}
 
-	filename = HostProc()
+	filename = HostProcWithContext(ctx)
 	if PathExists(filepath.Join(filename, "bc", "0")) {
 		system = "openvz"
 		role = "host"
@@ -251,15 +286,15 @@ func VirtualizationWithContext(ctx context.Context) (string, string, error) {
 		}
 	}
 
-	if PathExists(HostEtc("os-release")) {
-		p, _, err := GetOSRelease()
+	if PathExists(HostEtcWithContext(ctx, "os-release")) {
+		p, _, err := GetOSReleaseWithContext(ctx)
 		if err == nil && p == "coreos" {
 			system = "rkt" // Is it true?
 			role = "host"
 		}
 	}
 
-	if PathExists(HostRoot(".dockerenv")) {
+	if PathExists(HostRootWithContext(ctx, ".dockerenv")) {
 		system = "docker"
 		role = "guest"
 	}
@@ -278,7 +313,11 @@ func VirtualizationWithContext(ctx context.Context) (string, string, error) {
 }
 
 func GetOSRelease() (platform string, version string, err error) {
-	contents, err := ReadLines(HostEtc("os-release"))
+	return GetOSReleaseWithContext(context.Background())
+}
+
+func GetOSReleaseWithContext(ctx context.Context) (platform string, version string, err error) {
+	contents, err := ReadLines(HostEtcWithContext(ctx, "os-release"))
 	if err != nil {
 		return "", "", nil // return empty
 	}
@@ -290,7 +329,7 @@ func GetOSRelease() (platform string, version string, err error) {
 		switch field[0] {
 		case "ID": // use ID for lowercase
 			platform = trimQuotes(field[1])
-		case "VERSION":
+		case "VERSION_ID":
 			version = trimQuotes(field[1])
 		}
 	}

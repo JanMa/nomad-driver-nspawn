@@ -1,16 +1,26 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package mock
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"strconv"
 	"strings"
+	"testing"
+	"text/template"
 	"time"
 
-	"github.com/hashicorp/nomad/helper/uuid"
-	testing "github.com/mitchellh/go-testing-interface"
-
-	"github.com/hashicorp/nomad/nomad/structs"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hashicorp/nomad/helper/uuid"
+	"github.com/hashicorp/nomad/nomad/structs"
 )
 
 // StateStore defines the methods required from state.StateStore but avoids a
@@ -59,6 +69,40 @@ func NamespacePolicyWithVariables(namespace string, policy string, capabilities 
 	policyHCL += VariablePolicy(svars)
 	policyHCL += "\n}"
 	return policyHCL
+}
+
+func NodePoolPolicy(pool string, policy string, capabilities []string) string {
+	tmplStr := `
+node_pool "{{.Label}}" {
+  {{- if .Policy}}
+  policy = "{{.Policy}}"
+  {{end -}}
+
+  {{if gt (len .Capabilities) 0}}
+  capabilities = [
+    {{- range .Capabilities}}
+    "{{.}}",
+    {{- end}}
+  ]
+  {{- end}}
+}`
+
+	tmpl, err := template.New(pool).Parse(tmplStr)
+	if err != nil {
+		panic(err)
+	}
+
+	var buf bytes.Buffer
+	err = tmpl.Execute(&buf, struct {
+		Label        string
+		Policy       string
+		Capabilities []string
+	}{pool, policy, capabilities})
+	if err != nil {
+		panic(err)
+	}
+
+	return buf.String()
 }
 
 // VariablePolicy is a helper for generating the policy hcl for a given
@@ -121,7 +165,7 @@ func PluginPolicy(policy string) string {
 }
 
 // CreatePolicy creates a policy with the given name and rule.
-func CreatePolicy(t testing.T, state StateStore, index uint64, name, rule string) {
+func CreatePolicy(t testing.TB, state StateStore, index uint64, name, rule string) {
 	t.Helper()
 
 	// Create the ACLPolicy
@@ -134,7 +178,7 @@ func CreatePolicy(t testing.T, state StateStore, index uint64, name, rule string
 }
 
 // CreateToken creates a local, client token for the given policies
-func CreateToken(t testing.T, state StateStore, index uint64, policies []string) *structs.ACLToken {
+func CreateToken(t testing.TB, state StateStore, index uint64, policies []string) *structs.ACLToken {
 	t.Helper()
 
 	// Create the ACLToken
@@ -147,7 +191,7 @@ func CreateToken(t testing.T, state StateStore, index uint64, policies []string)
 
 // CreatePolicyAndToken creates a policy and then returns a token configured for
 // just that policy. CreatePolicyAndToken uses the given index and index+1.
-func CreatePolicyAndToken(t testing.T, state StateStore, index uint64, name, rule string) *structs.ACLToken {
+func CreatePolicyAndToken(t testing.TB, state StateStore, index uint64, name, rule string) *structs.ACLToken {
 	CreatePolicy(t, state, index, name, rule)
 	return CreateToken(t, state, index+1, []string{name})
 }
@@ -216,5 +260,119 @@ func ACLManagementToken() *structs.ACLToken {
 		CreateTime:  time.Now().UTC(),
 		CreateIndex: 10,
 		ModifyIndex: 20,
+	}
+}
+
+func ACLOIDCAuthMethod() *structs.ACLAuthMethod {
+	maxTokenTTL, _ := time.ParseDuration("3600s")
+	method := structs.ACLAuthMethod{
+		Name:          fmt.Sprintf("acl-auth-method-%s", uuid.Short()),
+		Type:          "OIDC",
+		TokenLocality: structs.ACLAuthMethodTokenLocalityLocal,
+		MaxTokenTTL:   maxTokenTTL,
+		Default:       false,
+		Config: &structs.ACLAuthMethodConfig{
+			OIDCDiscoveryURL:    "http://example.com",
+			OIDCClientID:        "mock",
+			OIDCClientSecret:    "very secret secret",
+			OIDCEnablePKCE:      false,
+			OIDCDisableUserInfo: false,
+			OIDCScopes:          []string{"groups"},
+			BoundAudiences:      []string{"sales", "engineering"},
+			AllowedRedirectURIs: []string{"foo", "bar"},
+			DiscoveryCaPem:      []string{"foo"},
+			SigningAlgs:         []string{"RS256"},
+			ClaimMappings:       map[string]string{"foo": "bar"},
+			ListClaimMappings:   map[string]string{"foo": "bar"},
+			VerboseLogging:      false,
+		},
+		CreateTime:  time.Now().UTC(),
+		CreateIndex: 10,
+		ModifyIndex: 10,
+	}
+	method.Canonicalize()
+	method.SetHash()
+	return &method
+}
+
+func ACLJWTAuthMethod() *structs.ACLAuthMethod {
+	maxTokenTTL, _ := time.ParseDuration("3600s")
+	method := structs.ACLAuthMethod{
+		Name:          fmt.Sprintf("acl-auth-method-%s", uuid.Short()),
+		Type:          "JWT",
+		TokenLocality: structs.ACLAuthMethodTokenLocalityLocal,
+		MaxTokenTTL:   maxTokenTTL,
+		Default:       false,
+		Config: &structs.ACLAuthMethodConfig{
+			JWTValidationPubKeys: []string{},
+			OIDCDiscoveryURL:     "http://example.com",
+			BoundAudiences:       []string{"sales", "engineering"},
+			DiscoveryCaPem:       []string{"foo"},
+			SigningAlgs:          []string{"RS256"},
+			ClaimMappings:        map[string]string{"foo": "bar"},
+			ListClaimMappings:    map[string]string{"foo": "bar"},
+		},
+		CreateTime:  time.Now().UTC(),
+		CreateIndex: 10,
+		ModifyIndex: 10,
+	}
+	method.Canonicalize()
+	method.SetHash()
+	return &method
+}
+
+// SampleJWTokenWithKeys takes a set of claims (can be nil) and optionally
+// a private RSA key that should be used for signing the JWT, and returns:
+// - a JWT signed with a randomly generated RSA key
+// - PEM string of the public part of that key that can be used for validation.
+func SampleJWTokenWithKeys(claims jwt.Claims, rsaKey *rsa.PrivateKey) (string, string, error) {
+	var token, pubkeyPem string
+
+	if rsaKey == nil {
+		var err error
+		rsaKey, err = rsa.GenerateKey(rand.Reader, 4096)
+		if err != nil {
+			return token, pubkeyPem, err
+		}
+	}
+
+	pubkeyBytes, err := x509.MarshalPKIXPublicKey(rsaKey.Public())
+	if err != nil {
+		return token, pubkeyPem, err
+	}
+	pubkeyPem = string(pem.EncodeToMemory(
+		&pem.Block{
+			Type:  "RSA PUBLIC KEY",
+			Bytes: pubkeyBytes,
+		},
+	))
+
+	var rawToken *jwt.Token
+	if claims != nil {
+		rawToken = jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	} else {
+		rawToken = jwt.New(jwt.SigningMethodRS256)
+	}
+
+	token, err = rawToken.SignedString(rsaKey)
+	if err != nil {
+		return token, pubkeyPem, err
+	}
+
+	return token, pubkeyPem, nil
+}
+
+func ACLBindingRule() *structs.ACLBindingRule {
+	return &structs.ACLBindingRule{
+		ID:          uuid.Short(),
+		Description: "mocked-acl-binding-rule",
+		AuthMethod:  "auth0",
+		Selector:    "engineering in list.roles",
+		BindType:    "role",
+		BindName:    "eng-ro",
+		CreateTime:  time.Now().UTC(),
+		ModifyTime:  time.Now().UTC(),
+		CreateIndex: 10,
+		ModifyIndex: 10,
 	}
 }

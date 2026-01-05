@@ -1,7 +1,11 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package taskenv
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -9,10 +13,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/hashicorp/nomad/client/lib/idset"
 	"github.com/hashicorp/nomad/helper"
 	hargs "github.com/hashicorp/nomad/helper/args"
 	"github.com/hashicorp/nomad/helper/escapingfs"
-	"github.com/hashicorp/nomad/lib/cpuset"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/plugins/drivers"
 	"github.com/zclconf/go-cty/cty"
@@ -94,6 +98,10 @@ const (
 
 	HostAddrPrefix = "NOMAD_HOST_ADDR_"
 
+	// UnixAddr is the task api unix socket, in the appropriate format
+	// for use in a NOMAD_ADDR (i.e. prefixed with "unix://")
+	UnixAddr = "NOMAD_UNIX_ADDR"
+
 	// IpPrefix is the prefix for passing the host IP of a port allocation
 	// to a task.
 	IpPrefix = "NOMAD_IP_"
@@ -117,11 +125,19 @@ const (
 	// UpstreamPrefix is the prefix for passing upstream IP and ports to the alloc
 	UpstreamPrefix = "NOMAD_UPSTREAM_"
 
+	// AllocPrefix is a general purpose alloc prefix. It is currently used as
+	// the env var prefix used to export network namespace information
+	// including IP, Port, and interface.
+	AllocPrefix = "NOMAD_ALLOC_"
+
 	// VaultToken is the environment variable for passing the Vault token
 	VaultToken = "VAULT_TOKEN"
 
 	// VaultNamespace is the environment variable for passing the Vault namespace, if applicable
 	VaultNamespace = "VAULT_NAMESPACE"
+
+	// WorkloadToken is the environment variable for passing the Nomad Workload Identity token
+	WorkloadToken = "NOMAD_TOKEN"
 )
 
 // The node values that can be interpreted.
@@ -131,20 +147,24 @@ const (
 	nodeRegionKey = "node.region"
 	nodeNameKey   = "node.unique.name"
 	nodeClassKey  = "node.class"
+	nodePoolKey   = "node.pool"
 
 	// Prefixes used for lookups.
 	nodeAttributePrefix = "attr."
 	nodeMetaPrefix      = "meta."
 )
 
-// TaskEnv is a task's environment as well as node attribute's for
-// interpolation.
+// TaskEnv is a task's environment as well as node attribute's and
+// task secrets for interpolation.
 type TaskEnv struct {
 	// NodeAttrs is the map of node attributes for interpolation
 	NodeAttrs map[string]string
 
 	// EnvMap is the map of environment variables
 	EnvMap map[string]string
+
+	// TaskSecrets is the map of secrets populated from the secrets hook
+	TaskSecrets map[string]string
 
 	// deviceEnv is the environment variables populated from the device hooks.
 	deviceEnv map[string]string
@@ -168,11 +188,12 @@ type TaskEnv struct {
 
 // NewTaskEnv creates a new task environment with the given environment, device
 // environment and node attribute maps.
-func NewTaskEnv(env, envClient, deviceEnv, node map[string]string, clientTaskDir, clientAllocDir string) *TaskEnv {
+func NewTaskEnv(env, envClient, deviceEnv, node map[string]string, secrets map[string]string, clientTaskDir, clientAllocDir string) *TaskEnv {
 	return &TaskEnv{
 		NodeAttrs:            node,
 		deviceEnv:            deviceEnv,
 		EnvMap:               env,
+		TaskSecrets:          secrets,
 		EnvMapClient:         envClient,
 		clientTaskDir:        clientTaskDir,
 		clientSharedAllocDir: clientAllocDir,
@@ -236,6 +257,32 @@ func (t *TaskEnv) All() map[string]string {
 	return m
 }
 
+// WithTask returns a shallow copy of the TaskEnv, with the EnvMap deep-cloned
+// and overwritten by task provided. This is only for use in the allocrunner
+// hooks which may need to interpolate per-task services or identities, as it
+// doesn't re-populate the rest of the environment
+func (t *TaskEnv) WithTask(alloc *structs.Allocation, task *structs.Task) *TaskEnv {
+	if t == nil {
+		return t
+	}
+	newT := new(TaskEnv)
+	*newT = *t
+	newT.envList = []string{}
+	newT.EnvMap = maps.Clone(t.EnvMap)
+
+	combined := alloc.Job.CombinedTaskMeta(alloc.TaskGroup, task.Name)
+	for k, v := range combined {
+		newT.EnvMap[fmt.Sprintf("%s%s", MetaPrefix, strings.ToUpper(k))] = v
+		newT.EnvMap[fmt.Sprintf("%s%s", MetaPrefix, k)] = v
+	}
+
+	for k, v := range task.Env {
+		newT.EnvMap[k] = v
+	}
+	newT.EnvMap[TaskName] = task.Name
+	return newT
+}
+
 // AllValues is a map of the task's environment variables and the node's
 // attributes with cty.Value (String) values. Errors including keys are
 // returned in a map by key name.
@@ -263,6 +310,13 @@ func (t *TaskEnv) AllValues() (map[string]cty.Value, map[string]error, error) {
 
 	// Prepare node-based variables (eg node.*, attr.*, meta.*)
 	for k, v := range t.NodeAttrs {
+		if err := addNestedKey(allMap, k, v); err != nil {
+			errs[k] = err
+		}
+	}
+
+	// Prepare task-based secrets for use in interpolation
+	for k, v := range t.TaskSecrets {
 		if err := addNestedKey(allMap, k, v); err != nil {
 			errs[k] = err
 		}
@@ -316,10 +370,10 @@ func (t *TaskEnv) ParseAndReplace(args []string) []string {
 }
 
 // ReplaceEnv takes an arg and replaces all occurrences of environment variables
-// and Nomad variables.  If the variable is found in the passed map it is
-// replaced, otherwise the original string is returned.
+// and Node attributes, and task secrets. If the variable is found in the passed map
+// it is replaced, otherwise the original string is returned.
 func (t *TaskEnv) ReplaceEnv(arg string) string {
-	return hargs.ReplaceEnv(arg, t.EnvMap, t.NodeAttrs)
+	return hargs.ReplaceEnv(arg, t.EnvMap, t.NodeAttrs, t.TaskSecrets)
 }
 
 // replaceEnvClient takes an arg and replaces all occurrences of client-specific
@@ -382,6 +436,9 @@ type Builder struct {
 	// nodeAttrs are Node attributes and metadata
 	nodeAttrs map[string]string
 
+	// taskSecrets are secrets populated from the secrets hook
+	taskSecrets map[string]string
+
 	// taskMeta are the meta attributes on the task
 	taskMeta map[string]string
 
@@ -406,25 +463,27 @@ type Builder struct {
 	// clientTaskSecretsDir is the secrets dir from the client's perspective; eg <client_task_root>/secrets
 	clientTaskSecretsDir string
 
-	cpuCores         string
-	cpuLimit         int64
-	memLimit         int64
-	memMaxLimit      int64
-	taskName         string
-	allocIndex       int
-	datacenter       string
-	cgroupParent     string
-	namespace        string
-	region           string
-	allocId          string
-	allocName        string
-	groupName        string
-	vaultToken       string
-	vaultNamespace   string
-	injectVaultToken bool
-	jobID            string
-	jobName          string
-	jobParentID      string
+	cpuCores             string
+	cpuLimit             int64
+	memLimit             int64
+	memMaxLimit          int64
+	taskName             string
+	allocIndex           int
+	datacenter           string
+	cgroupParent         string
+	namespace            string
+	region               string
+	allocId              string
+	allocName            string
+	groupName            string
+	vaultToken           string
+	vaultNamespace       string
+	injectVaultToken     bool
+	workloadTokenDefault string
+	workloadTokens       map[string]string // identity name -> encoded JWT
+	jobID                string
+	jobName              string
+	jobParentID          string
 
 	// otherPorts for tasks in the same alloc
 	otherPorts map[string]string
@@ -437,6 +496,9 @@ type Builder struct {
 	// because portMaps and advertiseIP can change after builder creation
 	// and affect network env vars.
 	networks []*structs.NetworkResource
+
+	networkStatus  *structs.AllocNetworkStatus
+	allocatedPorts structs.AllocatedPorts
 
 	// hookEnvs are env vars set by hooks and stored by hook name to
 	// support adding/removing vars from multiple hooks (eg HookA adds A:1,
@@ -468,9 +530,10 @@ func NewBuilder(node *structs.Node, alloc *structs.Allocation, task *structs.Tas
 // NewEmptyBuilder creates a new environment builder.
 func NewEmptyBuilder() *Builder {
 	return &Builder{
-		mu:       &sync.RWMutex{},
-		hookEnvs: map[string]map[string]string{},
-		envvars:  make(map[string]string),
+		mu:          &sync.RWMutex{},
+		hookEnvs:    map[string]map[string]string{},
+		envvars:     make(map[string]string),
+		taskSecrets: make(map[string]string),
 	}
 }
 
@@ -557,6 +620,12 @@ func (b *Builder) buildEnv(allocDir, localDir, secretsDir string,
 	// Build the Consul Connect upstream env vars
 	buildUpstreamsEnv(envMap, b.upstreams)
 
+	// Build the network namespace information if we have the required detail
+	// available.
+	if b.networkStatus != nil && b.allocatedPorts != nil {
+		addNomadAllocNetwork(envMap, b.allocatedPorts, b.networkStatus)
+	}
+
 	// Build the Vault Token
 	if b.injectVaultToken && b.vaultToken != "" {
 		envMap[VaultToken] = b.vaultToken
@@ -565,6 +634,17 @@ func (b *Builder) buildEnv(allocDir, localDir, secretsDir string,
 	// Build the Vault Namespace
 	if b.injectVaultToken && b.vaultNamespace != "" {
 		envMap[VaultNamespace] = b.vaultNamespace
+	}
+
+	// Build the Nomad Workload Token
+	if b.workloadTokenDefault != "" {
+		envMap[WorkloadToken] = b.workloadTokenDefault
+		envMap[UnixAddr] = "unix://" + filepath.Join(secretsDir, "api.sock")
+	}
+
+	for name, token := range b.workloadTokens {
+		envMap[WorkloadToken+"_"+name] = token
+		envMap[UnixAddr] = "unix://" + filepath.Join(secretsDir, "api.sock")
 	}
 
 	// Copy and interpolate task meta
@@ -584,7 +664,7 @@ func (b *Builder) buildEnv(allocDir, localDir, secretsDir string,
 
 	// Copy interpolated task env vars second as they override host env vars
 	for k, v := range b.envvars {
-		envMap[k] = hargs.ReplaceEnv(v, nodeAttrs, envMap)
+		envMap[k] = hargs.ReplaceEnv(v, nodeAttrs, envMap, b.taskSecrets)
 	}
 
 	// Copy hook env vars in the order the hooks were run
@@ -626,10 +706,11 @@ func (b *Builder) buildEnv(allocDir, localDir, secretsDir string,
 
 // Build must be called after all the tasks environment values have been set.
 func (b *Builder) Build() *TaskEnv {
-	nodeAttrs := make(map[string]string)
 
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+
+	nodeAttrs := make(map[string]string)
 
 	if b.region != "" {
 		// Copy region over to node attrs
@@ -643,14 +724,13 @@ func (b *Builder) Build() *TaskEnv {
 	envMap, deviceEnvs := b.buildEnv(b.allocDir, b.localDir, b.secretsDir, nodeAttrs)
 	envMapClient, _ := b.buildEnv(b.clientSharedAllocDir, b.clientTaskLocalDir, b.clientTaskSecretsDir, nodeAttrs)
 
-	return NewTaskEnv(envMap, envMapClient, deviceEnvs, nodeAttrs, b.clientTaskRoot, b.clientSharedAllocDir)
+	return NewTaskEnv(envMap, envMapClient, deviceEnvs, nodeAttrs, b.taskSecrets, b.clientTaskRoot, b.clientSharedAllocDir)
 }
 
-// UpdateTask updates the environment based on a new alloc and task.
-func (b *Builder) UpdateTask(alloc *structs.Allocation, task *structs.Task) *Builder {
+func (b *Builder) SetSecrets(secrets map[string]string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.setTask(task).setAlloc(alloc)
+	maps.Copy(b.taskSecrets, secrets)
 }
 
 // SetHookEnv sets environment variables from a hook. Variables are
@@ -756,7 +836,7 @@ func (b *Builder) setAlloc(alloc *structs.Allocation) *Builder {
 		// Populate task resources
 		if tr, ok := alloc.AllocatedResources.Tasks[b.taskName]; ok {
 			b.cpuLimit = tr.Cpu.CpuShares
-			b.cpuCores = cpuset.New(tr.Cpu.ReservedCores...).String()
+			b.cpuCores = idset.From[uint16](tr.Cpu.ReservedCores).String()
 			b.memLimit = tr.Memory.MemoryMB
 			b.memMaxLimit = tr.Memory.MemoryMaxMB
 
@@ -799,6 +879,7 @@ func (b *Builder) setAlloc(alloc *structs.Allocation) *Builder {
 
 		// Add any allocated host ports
 		if alloc.AllocatedResources.Shared.Ports != nil {
+			b.allocatedPorts = alloc.AllocatedResources.Shared.Ports
 			addPorts(b.otherPorts, alloc.AllocatedResources.Shared.Ports)
 		}
 	}
@@ -818,11 +899,15 @@ func (b *Builder) setAlloc(alloc *structs.Allocation) *Builder {
 
 // setNode is called from NewBuilder to populate node attributes.
 func (b *Builder) setNode(n *structs.Node) *Builder {
+	if n == nil {
+		return b
+	}
 	b.nodeAttrs = make(map[string]string, 4+len(n.Attributes)+len(n.Meta))
 	b.nodeAttrs[nodeIdKey] = n.ID
 	b.nodeAttrs[nodeNameKey] = n.Name
 	b.nodeAttrs[nodeClassKey] = n.NodeClass
 	b.nodeAttrs[nodeDcKey] = n.Datacenter
+	b.nodeAttrs[nodePoolKey] = n.NodePool
 	b.datacenter = n.Datacenter
 	b.cgroupParent = n.CgroupParent
 
@@ -918,7 +1003,16 @@ func buildNetworkEnv(envMap map[string]string, nets structs.Networks, driverNet 
 func buildPortEnv(envMap map[string]string, p structs.Port, ip string, driverNet *drivers.DriverNetwork) {
 	// Host IP, port, and address
 	portStr := strconv.Itoa(p.Value)
+
+	var ipFamilyPrefix string
+	if strings.Contains(ip, ":") {
+		ipFamilyPrefix = "NOMAD_IPv6_"
+	} else {
+		ipFamilyPrefix = "NOMAD_IPv4_"
+	}
+
 	envMap[IpPrefix+p.Label] = ip
+	envMap[ipFamilyPrefix+p.Label] = ip
 	envMap[HostPortPrefix+p.Label] = portStr
 	envMap[AddrPrefix+p.Label] = net.JoinHostPort(ip, portStr)
 
@@ -943,6 +1037,13 @@ func (b *Builder) setUpstreamsLocked(upstreams []structs.ConsulUpstream) *Builde
 	return b
 }
 
+func (b *Builder) SetNetworkStatus(netStatus *structs.AllocNetworkStatus) *Builder {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.networkStatus = netStatus
+	return b
+}
+
 // buildUpstreamsEnv builds NOMAD_UPSTREAM_{IP,PORT,ADDR}_{destination} vars
 func buildUpstreamsEnv(envMap map[string]string, upstreams []structs.ConsulUpstream) {
 	// Proxy sidecars always bind to localhost
@@ -958,6 +1059,18 @@ func buildUpstreamsEnv(envMap map[string]string, upstreams []structs.ConsulUpstr
 		envMap[UpstreamPrefix+"ADDR_"+cleanName] = net.JoinHostPort(ip, port)
 		envMap[UpstreamPrefix+"IP_"+cleanName] = ip
 		envMap[UpstreamPrefix+"PORT_"+cleanName] = port
+	}
+}
+
+// addNomadAllocNetwork builds NOMAD_ALLOC_{IP,INTERFACE,ADDR}_{port_label}
+// vars. NOMAD_ALLOC_PORT_* is handled within addPorts and therefore omitted
+// from this function.
+func addNomadAllocNetwork(envMap map[string]string, p structs.AllocatedPorts, netStatus *structs.AllocNetworkStatus) {
+	for _, allocatedPort := range p {
+		portStr := strconv.Itoa(allocatedPort.To)
+		envMap[AllocPrefix+"INTERFACE_"+allocatedPort.Label] = netStatus.InterfaceName
+		envMap[AllocPrefix+"IP_"+allocatedPort.Label] = netStatus.Address
+		envMap[AllocPrefix+"ADDR_"+allocatedPort.Label] = net.JoinHostPort(netStatus.Address, portStr)
 	}
 }
 
@@ -1014,6 +1127,23 @@ func (b *Builder) SetVaultToken(token, namespace string, inject bool) *Builder {
 	b.vaultToken = token
 	b.vaultNamespace = namespace
 	b.injectVaultToken = inject
+	b.mu.Unlock()
+	return b
+}
+
+func (b *Builder) SetDefaultWorkloadToken(token string) *Builder {
+	b.mu.Lock()
+	b.workloadTokenDefault = token
+	b.mu.Unlock()
+	return b
+}
+
+func (b *Builder) SetWorkloadToken(name, token string) *Builder {
+	b.mu.Lock()
+	if b.workloadTokens == nil {
+		b.workloadTokens = map[string]string{}
+	}
+	b.workloadTokens[name] = token
 	b.mu.Unlock()
 	return b
 }

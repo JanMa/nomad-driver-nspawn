@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package drivers
 
 import (
@@ -13,6 +16,7 @@ import (
 	"github.com/hashicorp/nomad/helper/pluginutils/grpcutils"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/plugins/base"
+	"github.com/hashicorp/nomad/plugins/drivers/fsisolation"
 	"github.com/hashicorp/nomad/plugins/drivers/proto"
 	"github.com/hashicorp/nomad/plugins/shared/hclspec"
 	pstructs "github.com/hashicorp/nomad/plugins/shared/structs"
@@ -63,17 +67,20 @@ func (d *driverPluginClient) Capabilities() (*Capabilities, error) {
 
 		switch resp.Capabilities.FsIsolation {
 		case proto.DriverCapabilities_NONE:
-			caps.FSIsolation = FSIsolationNone
+			caps.FSIsolation = fsisolation.None
 		case proto.DriverCapabilities_CHROOT:
-			caps.FSIsolation = FSIsolationChroot
+			caps.FSIsolation = fsisolation.Chroot
 		case proto.DriverCapabilities_IMAGE:
-			caps.FSIsolation = FSIsolationImage
+			caps.FSIsolation = fsisolation.Image
+		case proto.DriverCapabilities_UNVEIL:
+			caps.FSIsolation = fsisolation.Unveil
 		default:
-			caps.FSIsolation = FSIsolationNone
+			caps.FSIsolation = fsisolation.None
 		}
 
 		caps.MountConfigs = MountConfigSupport(resp.Capabilities.MountConfigs)
-		caps.RemoteTasks = resp.Capabilities.RemoteTasks
+		caps.DisableLogCollection = resp.Capabilities.DisableLogCollection
+		caps.DynamicWorkloadUsers = resp.Capabilities.DynamicWorkloadUsers
 	}
 
 	return caps, nil
@@ -486,6 +493,10 @@ func (d *driverPluginClient) CreateNetwork(allocID string, _ *NetworkCreateReque
 }
 
 func (d *driverPluginClient) DestroyNetwork(allocID string, spec *NetworkIsolationSpec) error {
+	if spec == nil {
+		return nil
+	}
+
 	req := &proto.DestroyNetworkRequest{
 		AllocId:       allocID,
 		IsolationSpec: NetworkIsolationSpecToProto(spec),

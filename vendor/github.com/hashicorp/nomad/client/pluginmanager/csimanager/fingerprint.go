@@ -1,14 +1,17 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package csimanager
 
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/nomad/client/dynamicplugins"
 	"github.com/hashicorp/nomad/nomad/structs"
 	"github.com/hashicorp/nomad/plugins/csi"
-	"golang.org/x/exp/maps"
 )
 
 type pluginFingerprinter struct {

@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 //go:build linux
 
 package testutil
@@ -5,7 +8,7 @@ package testutil
 import (
 	"testing"
 
-	"github.com/opencontainers/runc/libcontainer/cgroups"
+	"github.com/opencontainers/cgroups"
 )
 
 // CgroupsCompatible returns true if either cgroups.v1 or cgroups.v2 is supported.

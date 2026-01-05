@@ -1,20 +1,153 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 //go:build windows
 
 package executor
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
+	"strings"
 	"syscall"
+	"unsafe"
+
+	hclog "github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/go-set/v3"
+	"github.com/hashicorp/nomad/client/lib/cpustats"
+	"github.com/hashicorp/nomad/drivers/shared/executor/procstats"
+	"github.com/hashicorp/nomad/plugins/drivers"
+	"golang.org/x/sys/windows"
 )
 
-// configure new process group for child process
+func NewExecutorWithIsolation(logger hclog.Logger, compute cpustats.Compute) Executor {
+	logger = logger.Named("executor")
+	logger.Error("isolation executor is not supported on this platform, using default")
+	return NewExecutor(logger, compute)
+}
+
+func (e *UniversalExecutor) configureResourceContainer(_ *ExecCommand, _ int) (func() error, func(), error) {
+	cleanup := func() {}
+	running := func() error { return nil }
+	return running, cleanup, nil
+}
+
+func (e *UniversalExecutor) start(command *ExecCommand) error {
+	return e.childCmd.Start()
+}
+
+func withNetworkIsolation(f func() error, _ *drivers.NetworkIsolationSpec) error {
+	return f()
+}
+
+func setCmdUser(cmd *exec.Cmd, user string) error {
+	if user == "" {
+		return nil
+	}
+	nameParts := strings.Split(user, "\\")
+	if len(nameParts) != 2 {
+		return errors.New("user name must contain domain")
+	}
+	token, err := createUserToken(nameParts[0], nameParts[1])
+	if err != nil {
+		return fmt.Errorf("failed to create user token: %w", err)
+	}
+
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Token = *token
+
+	runtime.AddCleanup(cmd, func(attr *syscall.SysProcAttr) {
+		_ = attr.Token.Close()
+	}, cmd.SysProcAttr)
+
+	return nil
+}
+
+var (
+	advapiDll      = windows.NewLazySystemDLL("advapi32.dll")
+	procLogonUserW = advapiDll.NewProc("LogonUserW")
+)
+
+const (
+	_LOGON_SERVICE    uint32 = 5
+	_PROVIDER_DEFAULT uint32 = 0
+)
+
+func createUserToken(domain, username string) (*syscall.Token, error) {
+	userw, err := syscall.UTF16PtrFromString(username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert username to UTF-16: %w", err)
+	}
+	domainw, err := syscall.UTF16PtrFromString(domain)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert user domain to UTF-16: %w", err)
+	}
+	var token syscall.Token
+	ret, _, e := procLogonUserW.Call(
+		uintptr(unsafe.Pointer(userw)),
+		uintptr(unsafe.Pointer(domainw)),
+		uintptr(unsafe.Pointer(nil)),
+		uintptr(_LOGON_SERVICE),
+		uintptr(_PROVIDER_DEFAULT),
+		uintptr(unsafe.Pointer(&token)),
+	)
+	if ret == 0 {
+		return nil, e
+	}
+
+	return &token, nil
+}
+
+func (e *UniversalExecutor) ListProcesses() set.Collection[int] {
+	return procstats.ListByPid(e.childCmd.Process.Pid)
+}
+
+func (e *UniversalExecutor) setSubCmdCgroup(*exec.Cmd, string) (func(), error) {
+	return func() {}, nil
+}
+
+// configure new process group for child process and creates a JobObject for the
+// executor. Children of the executor will be created in the same JobObject
+// Ref: https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
 func (e *UniversalExecutor) setNewProcessGroup() error {
 	// We need to check that as build flags includes windows for this file
 	if e.childCmd.SysProcAttr == nil {
 		e.childCmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	e.childCmd.SysProcAttr.CreationFlags = syscall.CREATE_NEW_PROCESS_GROUP
+
+	// note: we don't call CloseHandle on this job handle because we need to
+	// hold onto it until the executor exits
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return fmt.Errorf("could not create Windows job object for executor: %w", err)
+	}
+
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+		},
+	}
+	_, err = windows.SetInformationJobObject(
+		job,
+		windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)))
+	if err != nil {
+		return fmt.Errorf("could not configure Windows job object for executor: %w", err)
+	}
+
+	handle := windows.CurrentProcess()
+	err = windows.AssignProcessToJobObject(job, handle)
+	if err != nil {
+		return fmt.Errorf("could not assign executor to Windows job object: %w", err)
+	}
+
 	return nil
 }
 
@@ -42,18 +175,9 @@ func (e *UniversalExecutor) killProcessTree(proc *os.Process) error {
 }
 
 // Send a Ctrl-Break signal for shutting down the process,
-// like in https://golang.org/src/os/signal/signal_windows_test.go
 func sendCtrlBreak(pid int) error {
-	dll, err := syscall.LoadDLL("kernel32.dll")
+	err := windows.GenerateConsoleCtrlEvent(syscall.CTRL_BREAK_EVENT, uint32(pid))
 	if err != nil {
-		return fmt.Errorf("Error loading kernel32.dll: %v", err)
-	}
-	proc, err := dll.FindProc("GenerateConsoleCtrlEvent")
-	if err != nil {
-		return fmt.Errorf("Cannot find procedure GenerateConsoleCtrlEvent: %v", err)
-	}
-	result, _, err := proc.Call(syscall.CTRL_BREAK_EVENT, uintptr(pid))
-	if result == 0 {
 		return fmt.Errorf("Error sending ctrl-break event: %v", err)
 	}
 	return nil
