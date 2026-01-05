@@ -1,8 +1,12 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package testutil
 
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -10,7 +14,6 @@ import (
 	"github.com/kr/pretty"
 	"github.com/shoenig/test/must"
 	"github.com/shoenig/test/wait"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hashicorp/nomad/nomad/structs"
 )
@@ -21,22 +24,29 @@ type errorFn func(error)
 func Wait(t *testing.T, test testFn) {
 	t.Helper()
 	retries := 500 * TestMultiplier()
-	for retries > 0 {
+	warn := int64(float64(retries) * 0.75)
+	for tries := retries; tries > 0; {
 		time.Sleep(10 * time.Millisecond)
-		retries--
+		tries--
 
 		success, err := test()
 		if success {
 			return
 		}
 
-		if retries == 0 {
+		switch tries {
+		case 0:
 			if err == nil {
 				t.Fatalf("timeout waiting for test function to succeed (you should probably return a helpful error instead of nil!)")
 			} else {
 				t.Fatalf("timeout: %v", err)
 			}
+		case warn:
+			pc, _, _, _ := runtime.Caller(1)
+			f := runtime.FuncForPC(pc)
+			t.Logf("%d/%d retries reached for %s (err=%v)", warn, retries, f.Name(), err)
 		}
+
 	}
 }
 
@@ -137,15 +147,16 @@ func WaitForLeader(t testing.TB, rpc rpcFn) {
 	})
 }
 
-// WaitForLeaders blocks until each serverRPC knows the leader.
-func WaitForLeaders(t testing.TB, serverRPCs ...rpcFn) {
+// WaitForLeaders blocks until each rpcs knows the leader.
+func WaitForLeaders(t testing.TB, rpcs ...rpcFn) string {
 	t.Helper()
 
-	for i := 0; i < len(serverRPCs); i++ {
+	var leader string
+	for i := 0; i < len(rpcs); i++ {
 		ok := func() (bool, error) {
+			leader = ""
 			args := &structs.GenericRequest{}
-			var leader string
-			err := serverRPCs[i]("Status.Leader", args, &leader)
+			err := rpcs[i]("Status.Leader", args, &leader)
 			return leader != "", err
 		}
 		must.Wait(t, wait.InitialSuccess(
@@ -154,6 +165,26 @@ func WaitForLeaders(t testing.TB, serverRPCs ...rpcFn) {
 			wait.Gap(1*time.Second),
 		))
 	}
+
+	return leader
+}
+
+// WaitForKeyring blocks until the keyring is initialized.
+func WaitForKeyring(t testing.TB, rpc rpcFn, region string) {
+	t.Helper()
+	args := structs.GenericRequest{
+		QueryOptions: structs.QueryOptions{
+			Namespace: "default",
+			Region:    region,
+		},
+	}
+	reply := structs.KeyringListPublicResponse{}
+	WaitForResult(func() (bool, error) {
+		err := rpc("Keyring.ListPublic", &args, &reply)
+		return len(reply.PublicKeys) > 0, err
+	}, func(err error) {
+		t.Fatalf("timed out waiting for keyring to initialize: %v", err)
+	})
 }
 
 // WaitForClient blocks until the client can be found
@@ -162,8 +193,15 @@ func WaitForClient(t testing.TB, rpc rpcFn, nodeID string, region string) {
 	WaitForClientStatus(t, rpc, nodeID, region, structs.NodeStatusReady)
 }
 
-// WaitForClientStatus blocks until the client is in the expected status.
-func WaitForClientStatus(t testing.TB, rpc rpcFn, nodeID string, region string, status string) {
+// WaitForClientStatus blocks until the client is in the expected status
+func WaitForClientStatus(t testing.TB, rpc rpcFn, nodeID, region, status string) {
+	t.Helper()
+	WaitForClientStatusWithToken(t, rpc, nodeID, region, status, "")
+}
+
+// WaitForClientStatusWithToken blocks until the client is in the expected
+// status, for use with ACLs enabled
+func WaitForClientStatusWithToken(t testing.TB, rpc rpcFn, nodeID, region, status, token string) {
 	t.Helper()
 
 	if region == "" {
@@ -171,8 +209,11 @@ func WaitForClientStatus(t testing.TB, rpc rpcFn, nodeID string, region string, 
 	}
 	WaitForResult(func() (bool, error) {
 		req := structs.NodeSpecificRequest{
-			NodeID:       nodeID,
-			QueryOptions: structs.QueryOptions{Region: region},
+			NodeID: nodeID,
+			QueryOptions: structs.QueryOptions{
+				Region:    region,
+				AuthToken: token,
+			},
 		}
 		var out structs.SingleNodeResponse
 
@@ -270,7 +311,7 @@ func WaitForRunningWithToken(t testing.TB, rpc rpcFn, job *structs.Job, token st
 
 		if len(resp.Allocations) == 0 {
 			evals := structs.JobEvaluationsResponse{}
-			require.NoError(t, rpc("Job.Evaluations", args, &evals), "error looking up evals")
+			must.NoError(t, rpc("Job.Evaluations", args, &evals), must.Sprintf("error looking up evals"))
 			return false, fmt.Errorf("0 allocations; evals: %s", pretty.Sprint(evals.Evaluations))
 		}
 
@@ -283,7 +324,7 @@ func WaitForRunningWithToken(t testing.TB, rpc rpcFn, job *structs.Job, token st
 
 		return true, nil
 	}, func(err error) {
-		require.NoError(t, err)
+		must.NoError(t, err)
 	})
 
 	return resp.Allocations
@@ -294,7 +335,7 @@ func WaitForRunning(t testing.TB, rpc rpcFn, job *structs.Job) []*structs.AllocL
 	return WaitForRunningWithToken(t, rpc, job, "")
 }
 
-// WaitforJobAllocStatus blocks until the ClientStatus of allocations for a job
+// WaitForJobAllocStatus blocks until the ClientStatus of allocations for a job
 // match the expected map of <ClientStatus>: <count>.
 func WaitForJobAllocStatus(t testing.TB, rpc rpcFn, job *structs.Job, allocStatus map[string]int) {
 	t.Helper()
@@ -303,9 +344,10 @@ func WaitForJobAllocStatus(t testing.TB, rpc rpcFn, job *structs.Job, allocStatu
 
 // WaitForJobAllocStatusWithToken behaves the same way as WaitForJobAllocStatus
 // but is used for clusters with ACL enabled.
-func WaitForJobAllocStatusWithToken(t testing.TB, rpc rpcFn, job *structs.Job, allocStatus map[string]int, token string) {
+func WaitForJobAllocStatusWithToken(t testing.TB, rpc rpcFn, job *structs.Job, allocStatus map[string]int, token string) []*structs.AllocListStub {
 	t.Helper()
 
+	var allocs []*structs.AllocListStub
 	WaitForResultRetries(2000*TestMultiplier(), func() (bool, error) {
 		args := &structs.JobSpecificRequest{
 			JobID: job.ID,
@@ -324,9 +366,11 @@ func WaitForJobAllocStatusWithToken(t testing.TB, rpc rpcFn, job *structs.Job, a
 
 		if len(resp.Allocations) == 0 {
 			evals := structs.JobEvaluationsResponse{}
-			require.NoError(t, rpc("Job.Evaluations", args, &evals), "error looking up evals")
+			must.NoError(t, rpc("Job.Evaluations", args, &evals), must.Sprintf("error looking up evals"))
 			return false, fmt.Errorf("0 allocations; evals: %s", pretty.Sprint(evals.Evaluations))
 		}
+
+		allocs = resp.Allocations
 
 		got := map[string]int{}
 		for _, alloc := range resp.Allocations {
@@ -339,6 +383,59 @@ func WaitForJobAllocStatusWithToken(t testing.TB, rpc rpcFn, job *structs.Job, a
 	}, func(err error) {
 		must.NoError(t, err)
 	})
+
+	return allocs
+}
+
+// WaitForJobEvalStatus blocks until the job's evals match the status described
+// in the map of <Eval.Status>: <count>.
+func WaitForJobEvalStatus(t testing.TB, rpc rpcFn, job *structs.Job, evalStatus map[string]int) []*structs.Evaluation {
+	return WaitForJobEvalStatusWithToken(t, rpc, job, evalStatus, "")
+}
+
+// WaitForJobEvalStatusWithToken is the same as WaitforJobEvalStatus  with ACL
+// enabled.
+func WaitForJobEvalStatusWithToken(t testing.TB, rpc rpcFn, job *structs.Job, evalStatus map[string]int, token string) []*structs.Evaluation {
+	var evals []*structs.Evaluation
+
+	errorFunc := func() error {
+		req := &structs.JobSpecificRequest{
+			JobID: job.ID,
+			QueryOptions: structs.QueryOptions{
+				AuthToken: token,
+				Namespace: job.Namespace,
+				Region:    job.Region,
+			},
+		}
+		var resp structs.JobEvaluationsResponse
+		err := rpc("Job.Evaluations", req, &resp)
+		if err != nil {
+			return fmt.Errorf("failed to call Job.Evaluations RPC: %w", err)
+		}
+
+		got := make(map[string]int)
+		for _, eval := range resp.Evaluations {
+			got[eval.Status]++
+		}
+
+		if diff := cmp.Diff(evalStatus, got); diff != "" {
+			return fmt.Errorf("eval status mismatch (-want +got):\n%s", diff)
+		}
+
+		evals = resp.Evaluations
+		return nil
+	}
+
+	must.Wait(t,
+		wait.InitialSuccess(
+			wait.ErrorFunc(errorFunc),
+			wait.Timeout(time.Duration(TestMultiplier())*time.Second),
+			wait.Gap(10*time.Millisecond),
+		),
+		must.Sprintf("failed to wait for job %s eval status", job.ID),
+	)
+
+	return evals
 }
 
 // WaitForFiles blocks until all the files in the slice are present

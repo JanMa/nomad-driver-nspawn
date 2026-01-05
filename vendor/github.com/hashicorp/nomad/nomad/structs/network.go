@@ -1,13 +1,15 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package structs
 
 import (
 	"fmt"
+	"maps"
 	"math/rand"
 	"net"
+	"slices"
 	"sync"
-
-	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 )
 
 const (
@@ -180,18 +182,6 @@ func (idx *NetworkIndex) Release() {
 	}
 }
 
-// Overcommitted checks if the network is overcommitted
-func (idx *NetworkIndex) Overcommitted() bool {
-	// TODO remove since bandwidth is deprecated
-	/*for device, used := range idx.UsedBandwidth {
-		avail := idx.AvailBandwidth[device]
-		if used > avail {
-			return true
-		}
-	}*/
-	return false
-}
-
 // SetNode is used to initialize a node's network index with available IPs,
 // reserved ports, and other details from a node's configuration and
 // fingerprinting.
@@ -218,8 +208,6 @@ func (idx *NetworkIndex) SetNode(node *Node) error {
 	var taskNetworks []*NetworkResource
 	if node.NodeResources != nil && len(node.NodeResources.Networks) != 0 {
 		taskNetworks = node.NodeResources.Networks
-	} else if node.Resources != nil {
-		taskNetworks = node.Resources.Networks
 	}
 
 	// Reserved ports get merged downward. For example given an agent
@@ -245,30 +233,6 @@ func (idx *NetworkIndex) SetNode(node *Node) error {
 		globalResPorts = make([]uint, len(resPorts))
 		for i, p := range resPorts {
 			globalResPorts[i] = uint(p)
-		}
-	} else if node.Reserved != nil {
-		// COMPAT(0.11): Remove after 0.11. Nodes stopped reporting
-		// reserved ports under Node.Reserved.Resources in #4750 / v0.9
-		for _, n := range node.Reserved.Networks {
-			used := idx.getUsedPortsFor(n.IP)
-			for _, ports := range [][]Port{n.ReservedPorts, n.DynamicPorts} {
-				for _, p := range ports {
-					if p.Value > MaxValidPort || p.Value < 0 {
-						// This is a fatal error that
-						// should have been prevented
-						// by validation upstream.
-						return fmt.Errorf("invalid port %d for reserved_ports", p.Value)
-					}
-
-					globalResPorts = append(globalResPorts, uint(p.Value))
-					used.Set(uint(p.Value))
-				}
-			}
-
-			// Reserve mbits
-			if n.Device != "" {
-				idx.UsedBandwidth[n.Device] += n.MBits
-			}
 		}
 	}
 
@@ -428,14 +392,16 @@ func (idx *NetworkIndex) AddReserved(n *NetworkResource) (collide bool, reasons 
 
 func (idx *NetworkIndex) AddReservedPorts(ports AllocatedPorts) (collide bool, reasons []string) {
 	for _, port := range ports {
-		used := idx.getUsedPortsFor(port.HostIP)
 		if port.Value < 0 || port.Value >= MaxValidPort {
 			return true, []string{fmt.Sprintf("invalid port %d", port.Value)}
 		}
+		used := idx.getUsedPortsFor(port.HostIP)
 		if used.Check(uint(port.Value)) {
-			collide = true
-			reason := fmt.Sprintf("port %d already in use", port.Value)
-			reasons = append(reasons, reason)
+			if !port.IgnoreCollision {
+				collide = true
+				reason := fmt.Sprintf("port %d already in use", port.Value)
+				reasons = append(reasons, reason)
+			}
 		} else {
 			used.Set(uint(port.Value))
 		}
@@ -516,22 +482,26 @@ func (idx *NetworkIndex) AssignPorts(ask *NetworkResource) (AllocatedPorts, erro
 		var allocPort *AllocatedPortMapping
 		var addrErr error
 		for _, addr := range idx.HostNetworks[port.HostNetwork] {
-			used := idx.getUsedPortsFor(addr.Address)
 			// Guard against invalid port
 			if port.Value < 0 || port.Value >= MaxValidPort {
 				return nil, fmt.Errorf("invalid port %d (out of range)", port.Value)
 			}
 
 			// Check if in use
-			if used != nil && used.Check(uint(port.Value)) {
-				return nil, fmt.Errorf("reserved port collision %s=%d", port.Label, port.Value)
+			if !port.IgnoreCollision {
+				used := idx.getUsedPortsFor(addr.Address)
+				if used != nil && used.Check(uint(port.Value)) {
+					addrErr = fmt.Errorf("reserved port collision %s=%d", port.Label, port.Value)
+					continue
+				}
 			}
 
 			allocPort = &AllocatedPortMapping{
-				Label:  port.Label,
-				Value:  port.Value,
-				To:     port.To,
-				HostIP: addr.Address,
+				Label:           port.Label,
+				Value:           port.Value,
+				To:              port.To,
+				HostIP:          addr.Address,
+				IgnoreCollision: port.IgnoreCollision,
 			}
 			break
 		}

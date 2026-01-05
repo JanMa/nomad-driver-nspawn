@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package envoy provides a high level view of the variables that go into
 // selecting an envoy version.
 package envoy
@@ -39,17 +42,49 @@ const (
 	// Folks wanting to build and use custom images while still having Nomad refer
 	// to specific versions as preferred by Consul would set meta.connect.sidecar_image
 	// to something like: "custom/envoy:${NOMAD_envoy_version}".
-	ImageFormat = "envoyproxy/envoy:v" + VersionVar
+	ImageFormat = "docker.io/envoyproxy/envoy:v" + VersionVar
 
 	// VersionVar will be replaced with the Envoy version string when
 	// used in the meta.connect.sidecar_image variable.
 	VersionVar = "${NOMAD_envoy_version}"
 
-	// FallbackImage is the image set in the node meta by default
-	// to be used by Consul Connect sidecar tasks. As of Nomad 1.0, this value
-	// is only used as a fallback when the version of Consul does not yet support
-	// dynamic envoy versions.
-	FallbackImage = "envoyproxy/envoy:v1.11.2@sha256:a7769160c9c1a55bb8d07a3b71ce5d64f72b1f665f10d81aa1581bc3cf850d09"
+	// DefaultConnectLogLevel is the log level set in the node meta by default
+	// to be used by Consul Connect sidecar tasks.
+	DefaultConnectLogLevel = "info"
+
+	// DefaultConnectLogLevel is the node attribute for the DefaultConnectLogLevel
+	DefaultConnectLogLevelParam = "connect.log_level"
+
+	// DefaultConnectProxyConcurrency is the default number of worker threads the
+	// connect sidecar should be configured to use.
+	//
+	// https://www.envoyproxy.io/docs/envoy/latest/operations/cli#cmdoption-concurrency
+	DefaultConnectProxyConcurrency = "1"
+
+	// DefaultConnectProxyConcurrencyParam is the node attribute for the
+	// DefaultConnectProxyConcurrency
+	DefaultConnectProxyConcurrencyParam = "connect.proxy_concurrency"
+
+	// DefaultTransparentProxyUID is the default UID of the Envoy proxy
+	// container user, for use with transparent proxy
+	DefaultTransparentProxyUID = "101"
+
+	// DefaultTransparentProxyUIDParam is the node attribute for the
+	// DefaultTransparentProxyUID
+	DefaultTransparentProxyUIDParam = "connect.transparent_proxy.default_uid"
+
+	// DefaultTransparentProxyOutboundPort is the default outbound port for the
+	// Envoy proxy, for use with transparent proxy. Note the default value
+	// patches the default TransparentProxy service default for
+	// OutboundListenerPort. If the cluster admin sets this value to something
+	// non-default, they'll need to update the metadata on all the nodes to
+	// match. See also:
+	// https://developer.hashicorp.com/consul/docs/connect/config-entries/service-defaults#transparentproxy
+	DefaultTransparentProxyOutboundPort = "15001"
+
+	// DefaultTransparentProxyOutboundPortParam is the node attribute for the
+	// DefaultTransparentProxyOutboundPort
+	DefaultTransparentProxyOutboundPortParam = "connect.transparent_proxy.default_outbound_port"
 )
 
 // PortLabel creates a consistent port label using the inputs of a prefix,

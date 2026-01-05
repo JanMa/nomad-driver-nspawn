@@ -1,4 +1,7 @@
-//go:build darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
+//go:build unix
 
 package allocdir
 
@@ -31,8 +34,8 @@ var (
 // dropDirPermissions gives full access to a directory to all users and sets
 // the owner to nobody.
 func dropDirPermissions(path string, desired os.FileMode) error {
-	if err := os.Chmod(path, desired|0777); err != nil {
-		return fmt.Errorf("Chmod(%v) failed: %v", path, err)
+	if err := os.Chmod(path, desired|fileMode777); err != nil {
+		return fmt.Errorf("Chmod(%v) failed: %w", path, err)
 	}
 
 	// Can't change owner if not root.
@@ -40,23 +43,23 @@ func dropDirPermissions(path string, desired os.FileMode) error {
 		return nil
 	}
 
-	nobody, err := users.Nobody()
+	u, err := users.Lookup("nobody")
+	if err != nil {
+		return fmt.Errorf("Unable to find nobody user: %w", err)
+	}
+
+	uid, err := getUid(u)
 	if err != nil {
 		return err
 	}
 
-	uid, err := getUid(nobody)
-	if err != nil {
-		return err
-	}
-
-	gid, err := getGid(nobody)
+	gid, err := getGid(u)
 	if err != nil {
 		return err
 	}
 
 	if err := os.Chown(path, uid, gid); err != nil {
-		return fmt.Errorf("Couldn't change owner/group of %v to (uid: %v, gid: %v): %v", path, uid, gid, err)
+		return fmt.Errorf("Couldn't change owner/group of %v to (uid: %v, gid: %v): %w", path, uid, gid, err)
 	}
 
 	return nil
@@ -66,7 +69,7 @@ func dropDirPermissions(path string, desired os.FileMode) error {
 func getUid(u *user.User) (int, error) {
 	uid, err := strconv.Atoi(u.Uid)
 	if err != nil {
-		return 0, fmt.Errorf("Unable to convert Uid to an int: %v", err)
+		return 0, fmt.Errorf("Unable to convert Uid to an int: %w", err)
 	}
 
 	return uid, nil
@@ -76,7 +79,7 @@ func getUid(u *user.User) (int, error) {
 func getGid(u *user.User) (int, error) {
 	gid, err := strconv.Atoi(u.Gid)
 	if err != nil {
-		return 0, fmt.Errorf("Unable to convert Gid to an int: %v", err)
+		return 0, fmt.Errorf("Unable to convert Gid to an int: %w", err)
 	}
 
 	return gid, nil

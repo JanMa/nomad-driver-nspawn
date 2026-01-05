@@ -1,5 +1,4 @@
 //go:build cgo && seccomp
-// +build cgo,seccomp
 
 package patchbpf
 
@@ -19,7 +18,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/opencontainers/runc/libcontainer/configs"
-	"github.com/opencontainers/runc/libcontainer/utils"
 )
 
 // #cgo pkg-config: libseccomp
@@ -43,6 +41,11 @@ const uintptr_t C_SET_MODE_FILTER = SECCOMP_SET_MODE_FILTER;
 #endif
 const uintptr_t C_FILTER_FLAG_LOG = SECCOMP_FILTER_FLAG_LOG;
 
+#ifndef SECCOMP_FILTER_FLAG_SPEC_ALLOW
+#	define SECCOMP_FILTER_FLAG_SPEC_ALLOW (1UL << 2)
+#endif
+const uintptr_t C_FILTER_FLAG_SPEC_ALLOW = SECCOMP_FILTER_FLAG_SPEC_ALLOW;
+
 #ifndef SECCOMP_FILTER_FLAG_NEW_LISTENER
 #	define SECCOMP_FILTER_FLAG_NEW_LISTENER (1UL << 3)
 #endif
@@ -53,6 +56,14 @@ const uintptr_t C_FILTER_FLAG_NEW_LISTENER = SECCOMP_FILTER_FLAG_NEW_LISTENER;
 #define EM_RISCV		243
 #endif
 #define AUDIT_ARCH_RISCV64	(EM_RISCV|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
+#endif
+
+// TODO: If loongarch support is not fully merged, at some point we will want to remove this.
+#ifndef AUDIT_ARCH_LOONGARCH64
+#ifndef EM_LOONGARCH
+#define EM_LOONGARCH		258
+#endif
+#define AUDIT_ARCH_LOONGARCH64	(EM_LOONGARCH|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
 #endif
 
 // We use the AUDIT_ARCH_* values because those are the ones used by the kernel
@@ -75,10 +86,14 @@ const uint32_t C_AUDIT_ARCH_PPC64LE      = AUDIT_ARCH_PPC64LE;
 const uint32_t C_AUDIT_ARCH_S390         = AUDIT_ARCH_S390;
 const uint32_t C_AUDIT_ARCH_S390X        = AUDIT_ARCH_S390X;
 const uint32_t C_AUDIT_ARCH_RISCV64      = AUDIT_ARCH_RISCV64;
+const uint32_t C_AUDIT_ARCH_LOONGARCH64  = AUDIT_ARCH_LOONGARCH64; //nolint:godot // C code, not Go comment.
 */
 import "C"
 
 var retErrnoEnosys = uint32(C.C_ACT_ERRNO_ENOSYS)
+
+// Assume sizeof(int) == 4 in the BPF program.
+const bpfSizeofInt = 4
 
 // This syscall is used for multiplexing "large" syscalls on s390(x). Unknown
 // syscalls will end up with this syscall number, so we need to explicitly
@@ -99,15 +114,14 @@ func isAllowAction(action configs.Action) bool {
 
 func parseProgram(rdr io.Reader) ([]bpf.RawInstruction, error) {
 	var program []bpf.RawInstruction
-loop:
 	for {
 		// Read the next instruction. We have to use NativeEndian because
 		// seccomp_export_bpf outputs the program in *host* endian-ness.
 		var insn unix.SockFilter
-		if err := binary.Read(rdr, utils.NativeEndian, &insn); err != nil {
+		if err := binary.Read(rdr, binary.NativeEndian, &insn); err != nil {
 			if errors.Is(err, io.EOF) {
 				// Parsing complete.
-				break loop
+				break
 			}
 			if errors.Is(err, io.ErrUnexpectedEOF) {
 				// Parsing stopped mid-instruction.
@@ -164,11 +178,11 @@ func disassembleFilter(filter *libseccomp.ScmpFilter) ([]bpf.Instruction, error)
 	return program, nil
 }
 
-type nativeArch uint32
+type linuxAuditArch uint32
 
-const invalidArch nativeArch = 0
+const invalidArch linuxAuditArch = 0
 
-func archToNative(arch libseccomp.ScmpArch) (nativeArch, error) {
+func scmpArchToAuditArch(arch libseccomp.ScmpArch) (linuxAuditArch, error) {
 	switch arch {
 	case libseccomp.ArchNative:
 		// Convert to actual native architecture.
@@ -176,85 +190,91 @@ func archToNative(arch libseccomp.ScmpArch) (nativeArch, error) {
 		if err != nil {
 			return invalidArch, fmt.Errorf("unable to get native arch: %w", err)
 		}
-		return archToNative(arch)
+		return scmpArchToAuditArch(arch)
 	case libseccomp.ArchX86:
-		return nativeArch(C.C_AUDIT_ARCH_I386), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_I386), nil
 	case libseccomp.ArchAMD64, libseccomp.ArchX32:
 		// NOTE: x32 is treated like x86_64 except all x32 syscalls have the
 		//       30th bit of the syscall number set to indicate that it's not a
 		//       normal x86_64 syscall.
-		return nativeArch(C.C_AUDIT_ARCH_X86_64), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_X86_64), nil
 	case libseccomp.ArchARM:
-		return nativeArch(C.C_AUDIT_ARCH_ARM), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_ARM), nil
 	case libseccomp.ArchARM64:
-		return nativeArch(C.C_AUDIT_ARCH_AARCH64), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_AARCH64), nil
 	case libseccomp.ArchMIPS:
-		return nativeArch(C.C_AUDIT_ARCH_MIPS), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_MIPS), nil
 	case libseccomp.ArchMIPS64:
-		return nativeArch(C.C_AUDIT_ARCH_MIPS64), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_MIPS64), nil
 	case libseccomp.ArchMIPS64N32:
-		return nativeArch(C.C_AUDIT_ARCH_MIPS64N32), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_MIPS64N32), nil
 	case libseccomp.ArchMIPSEL:
-		return nativeArch(C.C_AUDIT_ARCH_MIPSEL), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_MIPSEL), nil
 	case libseccomp.ArchMIPSEL64:
-		return nativeArch(C.C_AUDIT_ARCH_MIPSEL64), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_MIPSEL64), nil
 	case libseccomp.ArchMIPSEL64N32:
-		return nativeArch(C.C_AUDIT_ARCH_MIPSEL64N32), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_MIPSEL64N32), nil
 	case libseccomp.ArchPPC:
-		return nativeArch(C.C_AUDIT_ARCH_PPC), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_PPC), nil
 	case libseccomp.ArchPPC64:
-		return nativeArch(C.C_AUDIT_ARCH_PPC64), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_PPC64), nil
 	case libseccomp.ArchPPC64LE:
-		return nativeArch(C.C_AUDIT_ARCH_PPC64LE), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_PPC64LE), nil
 	case libseccomp.ArchS390:
-		return nativeArch(C.C_AUDIT_ARCH_S390), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_S390), nil
 	case libseccomp.ArchS390X:
-		return nativeArch(C.C_AUDIT_ARCH_S390X), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_S390X), nil
 	case libseccomp.ArchRISCV64:
-		return nativeArch(C.C_AUDIT_ARCH_RISCV64), nil
+		return linuxAuditArch(C.C_AUDIT_ARCH_RISCV64), nil
+	case libseccomp.ArchLOONGARCH64:
+		return linuxAuditArch(C.C_AUDIT_ARCH_LOONGARCH64), nil
 	default:
 		return invalidArch, fmt.Errorf("unknown architecture: %v", arch)
 	}
 }
 
-type lastSyscallMap map[nativeArch]map[libseccomp.ScmpArch]libseccomp.ScmpSyscall
+type lastSyscallMap map[linuxAuditArch]map[libseccomp.ScmpArch]libseccomp.ScmpSyscall
 
 // Figure out largest syscall number referenced in the filter for each
 // architecture. We will be generating code based on the native architecture
 // representation, but SCMP_ARCH_X32 means we have to track cases where the
 // same architecture has different largest syscalls based on the mode.
 func findLastSyscalls(config *configs.Seccomp) (lastSyscallMap, error) {
-	lastSyscalls := make(lastSyscallMap)
-	// Only loop over architectures which are present in the filter. Any other
-	// architectures will get the libseccomp bad architecture action anyway.
+	scmpArchs := make(map[libseccomp.ScmpArch]struct{})
 	for _, ociArch := range config.Architectures {
 		arch, err := libseccomp.GetArchFromString(ociArch)
 		if err != nil {
 			return nil, fmt.Errorf("unable to validate seccomp architecture: %w", err)
 		}
+		scmpArchs[arch] = struct{}{}
+	}
+	// On architectures like ppc64le, Docker inexplicably doesn't include the
+	// native architecture in the architecture list which results in no
+	// architectures being present in the list at all (rendering the ENOSYS
+	// stub a no-op). So, always include the native architecture.
+	if nativeScmpArch, err := libseccomp.GetNativeArch(); err != nil {
+		return nil, fmt.Errorf("unable to get native arch: %w", err)
+	} else if _, ok := scmpArchs[nativeScmpArch]; !ok {
+		logrus.Debugf("seccomp: adding implied native architecture %v to config set", nativeScmpArch)
+		scmpArchs[nativeScmpArch] = struct{}{}
+	}
+	logrus.Debugf("seccomp: configured architecture set: %s", scmpArchs)
 
-		// Map native architecture to a real architecture value to avoid
-		// doubling-up the lastSyscall mapping.
-		if arch == libseccomp.ArchNative {
-			nativeArch, err := libseccomp.GetNativeArch()
-			if err != nil {
-				return nil, fmt.Errorf("unable to get native architecture: %w", err)
-			}
-			arch = nativeArch
-		}
-
-		// Figure out native architecture representation of the architecture.
-		nativeArch, err := archToNative(arch)
+	// Only loop over architectures which are present in the filter. Any other
+	// architectures will get the libseccomp bad architecture action anyway.
+	lastSyscalls := make(lastSyscallMap)
+	for arch := range scmpArchs {
+		auditArch, err := scmpArchToAuditArch(arch)
 		if err != nil {
 			return nil, fmt.Errorf("cannot map architecture %v to AUDIT_ARCH_ constant: %w", arch, err)
 		}
 
-		if _, ok := lastSyscalls[nativeArch]; !ok {
-			lastSyscalls[nativeArch] = map[libseccomp.ScmpArch]libseccomp.ScmpSyscall{}
+		if _, ok := lastSyscalls[auditArch]; !ok {
+			lastSyscalls[auditArch] = map[libseccomp.ScmpArch]libseccomp.ScmpSyscall{}
 		}
-		if _, ok := lastSyscalls[nativeArch][arch]; ok {
+		if _, ok := lastSyscalls[auditArch][arch]; ok {
 			// Because of ArchNative we may hit the same entry multiple times.
-			// Just skip it if we've seen this (nativeArch, ScmpArch)
+			// Just skip it if we've seen this (linuxAuditArch, ScmpArch)
 			// combination before.
 			continue
 		}
@@ -272,10 +292,11 @@ func findLastSyscalls(config *configs.Seccomp) (lastSyscallMap, error) {
 			}
 		}
 		if largestSyscall != 0 {
-			lastSyscalls[nativeArch][arch] = largestSyscall
+			logrus.Debugf("seccomp: largest syscall number for arch %v is %v", arch, largestSyscall)
+			lastSyscalls[auditArch][arch] = largestSyscall
 		} else {
-			logrus.Warnf("could not find any syscalls for arch %s", ociArch)
-			delete(lastSyscalls[nativeArch], arch)
+			logrus.Warnf("could not find any syscalls for arch %v", arch)
+			delete(lastSyscalls[auditArch], arch)
 		}
 	}
 	return lastSyscalls, nil
@@ -293,10 +314,10 @@ func findLastSyscalls(config *configs.Seccomp) (lastSyscallMap, error) {
 // close_range(2) which were added out-of-order in the syscall table between
 // kernel releases.
 func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) {
-	// A jump-table for each nativeArch used to generate the initial
+	// A jump-table for each linuxAuditArch used to generate the initial
 	// conditional jumps -- measured from the *END* of the program so they
 	// remain valid after prepending to the tail.
-	archJumpTable := map[nativeArch]uint32{}
+	archJumpTable := map[linuxAuditArch]uint32{}
 
 	// Generate our own -ENOSYS rules for each architecture. They have to be
 	// generated in reverse (prepended to the tail of the program) because the
@@ -309,7 +330,7 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 	}
 
 	// Generate the syscall -ENOSYS rules.
-	for nativeArch, maxSyscalls := range lastSyscalls {
+	for auditArch, maxSyscalls := range lastSyscalls {
 		// The number of instructions from the tail of this section which need
 		// to be jumped in order to reach the -ENOSYS return. If the section
 		// does not jump, it will fall through to the actual filter.
@@ -321,7 +342,7 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 		// share this code between architecture branches.
 		section := []bpf.Instruction{
 			// load [0] (syscall number)
-			bpf.LoadAbsolute{Off: 0, Size: 4}, // NOTE: We assume sizeof(int) == 4.
+			bpf.LoadAbsolute{Off: 0, Size: bpfSizeofInt},
 		}
 
 		switch len(maxSyscalls) {
@@ -381,8 +402,8 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 				sectionTail = []bpf.Instruction{
 					// jle [syscall],1
 					bpf.JumpIf{Cond: bpf.JumpLessOrEqual, Val: uint32(sysno), SkipTrue: 1},
-					// ja [baseJumpEnosys+1]
-					bpf.Jump{Skip: baseJumpEnosys + 1},
+					// ret [ENOSYS]
+					bpf.RetConstant{Val: retErrnoEnosys},
 					// ja [baseJumpFilter]
 					bpf.Jump{Skip: baseJumpFilter},
 				}
@@ -390,7 +411,7 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 
 			// If we're on x86 we need to add a check for x32 and if we're in
 			// the wrong mode we jump over the section.
-			if uint32(nativeArch) == uint32(C.C_AUDIT_ARCH_X86_64) {
+			if uint32(auditArch) == uint32(C.C_AUDIT_ARCH_X86_64) {
 				// Generate a prefix to check the mode.
 				switch scmpArch {
 				case libseccomp.ArchAMD64:
@@ -419,8 +440,8 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 			section = append(section, sectionTail...)
 		case 2:
 			// x32 and x86_64 are a unique case, we can't handle any others.
-			if uint32(nativeArch) != uint32(C.C_AUDIT_ARCH_X86_64) {
-				return nil, fmt.Errorf("unknown architecture overlap on native arch %#x", nativeArch)
+			if uint32(auditArch) != uint32(C.C_AUDIT_ARCH_X86_64) {
+				return nil, fmt.Errorf("unknown architecture overlap on native arch %#x", auditArch)
 			}
 
 			x32sysno, ok := maxSyscalls[libseccomp.ArchX32]
@@ -466,7 +487,7 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 				//   jset (1<<30),1
 				//   jgt [x86 syscall],1,2
 				//   jle [x32 syscall],1
-				//   ja [baseJumpEnosys+1]
+				//   ret [ENOSYS]
 				//   ja [baseJumpFilter]
 				section = append(section, []bpf.Instruction{
 					// jset (1<<30),1
@@ -477,14 +498,14 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 						Val:      uint32(x86sysno),
 						SkipTrue: 1, SkipFalse: 2,
 					},
-					// jle [x32 syscall],[baseJumpEnosys]
+					// jle [x32 syscall],1
 					bpf.JumpIf{
 						Cond:     bpf.JumpLessOrEqual,
 						Val:      uint32(x32sysno),
 						SkipTrue: 1,
 					},
-					// ja [baseJumpEnosys+1]
-					bpf.Jump{Skip: baseJumpEnosys + 1},
+					// ret [ENOSYS]
+					bpf.RetConstant{Val: retErrnoEnosys},
 					// ja [baseJumpFilter]
 					bpf.Jump{Skip: baseJumpFilter},
 				}...)
@@ -497,7 +518,7 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 		programTail = append(section, programTail...)
 
 		// Update jump table.
-		archJumpTable[nativeArch] = uint32(len(programTail))
+		archJumpTable[auditArch] = uint32(len(programTail))
 	}
 
 	// Add a dummy "jump to filter" for any architecture we might miss below.
@@ -517,9 +538,9 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 	//       architectures based on how large the jumps are going to be, or
 	//       re-sort the candidate architectures each time to make sure that we
 	//       pick the largest jump which is going to be smaller than 255.
-	for nativeArch := range lastSyscalls {
+	for auditArch := range lastSyscalls {
 		// We jump forwards but the jump table is calculated from the *END*.
-		jump := uint32(len(programTail)) - archJumpTable[nativeArch]
+		jump := uint32(len(programTail)) - archJumpTable[auditArch]
 
 		// Same routine as above -- this is a basic jeq check, complicated
 		// slightly if it turns out that we need to do a long jump.
@@ -528,7 +549,7 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 				// jeq [arch],[jump]
 				bpf.JumpIf{
 					Cond:     bpf.JumpEqual,
-					Val:      uint32(nativeArch),
+					Val:      uint32(auditArch),
 					SkipTrue: uint8(jump),
 				},
 			}, programTail...)
@@ -537,7 +558,7 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 				// jne [arch],1
 				bpf.JumpIf{
 					Cond:     bpf.JumpNotEqual,
-					Val:      uint32(nativeArch),
+					Val:      uint32(auditArch),
 					SkipTrue: 1,
 				},
 				// ja [jump]
@@ -549,7 +570,7 @@ func generateEnosysStub(lastSyscalls lastSyscallMap) ([]bpf.Instruction, error) 
 	// Prepend the load instruction for the architecture.
 	programTail = append([]bpf.Instruction{
 		// load [4] (architecture)
-		bpf.LoadAbsolute{Off: 4, Size: 4}, // NOTE: We assume sizeof(int) == 4.
+		bpf.LoadAbsolute{Off: bpfSizeofInt, Size: bpfSizeofInt},
 	}, programTail...)
 
 	// And that's all folks!
@@ -639,8 +660,14 @@ func filterFlags(config *configs.Seccomp, filter *libseccomp.ScmpFilter) (flags 
 			flags |= uint(C.C_FILTER_FLAG_LOG)
 		}
 	}
-
-	// TODO: Support seccomp flags not yet added to libseccomp-golang...
+	if apiLevel >= 4 {
+		if ssb, err := filter.GetSSB(); err != nil {
+			return 0, false, fmt.Errorf("unable to fetch SECCOMP_FILTER_FLAG_SPEC_ALLOW bit: %w", err)
+		} else if ssb {
+			flags |= uint(C.C_FILTER_FLAG_SPEC_ALLOW)
+		}
+	}
+	// XXX: add newly supported filter flags above this line.
 
 	for _, call := range config.Syscalls {
 		if call.Action == configs.Notify {
@@ -649,10 +676,13 @@ func filterFlags(config *configs.Seccomp, filter *libseccomp.ScmpFilter) (flags 
 		}
 	}
 
-	return
+	return flags, noNewPrivs, err
 }
 
 func sysSeccompSetFilter(flags uint, filter []unix.SockFilter) (fd int, err error) {
+	// This debug output is validated in tests/integration/seccomp.bats
+	// by the SECCOMP_FILTER_FLAG_* test.
+	logrus.Debugf("seccomp filter flags: %d", flags)
 	fprog := unix.SockFprog{
 		Len:    uint16(len(filter)),
 		Filter: &filter[0],
@@ -676,7 +706,7 @@ func sysSeccompSetFilter(flags uint, filter []unix.SockFilter) (fd int, err erro
 	}
 	runtime.KeepAlive(filter)
 	runtime.KeepAlive(fprog)
-	return
+	return fd, err
 }
 
 // PatchAndLoad takes a seccomp configuration and a libseccomp filter which has

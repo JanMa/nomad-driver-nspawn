@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package structs
 
 import (
@@ -13,6 +16,7 @@ const (
 	errNoRegionPath               = "No path to region"
 	errTokenNotFound              = "ACL token not found"
 	errTokenExpired               = "ACL token expired"
+	errTokenInvalid               = "ACL token is invalid" // not a UUID
 	errPermissionDenied           = "Permission denied"
 	errJobRegistrationDisabled    = "Job registration, dispatch, and scale are disabled by the scheduler configuration"
 	errNoNodeConn                 = "No path to node"
@@ -50,6 +54,7 @@ var (
 	ErrNoRegionPath               = errors.New(errNoRegionPath)
 	ErrTokenNotFound              = errors.New(errTokenNotFound)
 	ErrTokenExpired               = errors.New(errTokenExpired)
+	ErrTokenInvalid               = errors.New(errTokenInvalid)
 	ErrPermissionDenied           = errors.New(errPermissionDenied)
 	ErrJobRegistrationDisabled    = errors.New(errJobRegistrationDisabled)
 	ErrNoNodeConn                 = errors.New(errNoNodeConn)
@@ -76,6 +81,7 @@ var (
 	ErrCSIClientRPCRetryable  = errors.New("CSI client error (retryable)")
 	ErrCSIVolumeMaxClaims     = errors.New("volume max claims reached")
 	ErrCSIVolumeUnschedulable = errors.New("volume is currently unschedulable")
+	ErrCSIPluginInUse         = errors.New("plugin in use")
 )
 
 // IsErrNoLeader returns whether the error is due to there being no leader.

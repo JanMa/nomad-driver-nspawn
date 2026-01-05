@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/opencontainers/runc/libcontainer/cgroups"
+	"github.com/opencontainers/cgroups"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -37,11 +37,6 @@ func Example() *specs.Spec {
 					"CAP_NET_BIND_SERVICE",
 				},
 				Permitted: []string{
-					"CAP_AUDIT_WRITE",
-					"CAP_KILL",
-					"CAP_NET_BIND_SERVICE",
-				},
-				Ambient: []string{
 					"CAP_AUDIT_WRITE",
 					"CAP_KILL",
 					"CAP_NET_BIND_SERVICE",

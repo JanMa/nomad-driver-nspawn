@@ -1,12 +1,14 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package executor
 
 import (
 	"encoding/json"
 	"os"
 
-	hclog "github.com/hashicorp/go-hclog"
-	plugin "github.com/hashicorp/go-plugin"
-
+	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/go-plugin"
 	"github.com/hashicorp/nomad/plugins/base"
 )
 
@@ -46,10 +48,12 @@ func init() {
 			Plugins: GetPluginMap(
 				logger,
 				executorConfig.FSIsolation,
+				executorConfig.Compute,
 			),
 			GRPCServer: plugin.DefaultGRPCServer,
 			Logger:     logger,
 		})
+
 		os.Exit(0)
 	}
 }

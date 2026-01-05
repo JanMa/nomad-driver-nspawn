@@ -1,15 +1,18 @@
 package types
 
-import "github.com/opencontainers/runc/libcontainer/intelrdt"
+import (
+	"github.com/opencontainers/cgroups"
+	"github.com/opencontainers/runc/libcontainer/intelrdt"
+)
 
 // Event struct for encoding the event data to json.
 type Event struct {
-	Type string      `json:"type"`
-	ID   string      `json:"id"`
-	Data interface{} `json:"data,omitempty"`
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Data any    `json:"data,omitempty"`
 }
 
-// stats is the runc specific stats structure for stability when encoding and decoding stats.
+// Stats is the runc specific stats structure for stability when encoding and decoding stats.
 type Stats struct {
 	CPU               Cpu                 `json:"cpu"`
 	CPUSet            CPUSet              `json:"cpuset"`
@@ -20,6 +23,10 @@ type Stats struct {
 	IntelRdt          IntelRdt            `json:"intel_rdt"`
 	NetworkInterfaces []*NetworkInterface `json:"network_interfaces"`
 }
+
+type PSIData = cgroups.PSIData
+
+type PSIStats = cgroups.PSIStats
 
 type Hugetlb struct {
 	Usage   uint64 `json:"usage,omitempty"`
@@ -43,6 +50,7 @@ type Blkio struct {
 	IoMergedRecursive       []BlkioEntry `json:"ioMergedRecursive,omitempty"`
 	IoTimeRecursive         []BlkioEntry `json:"ioTimeRecursive,omitempty"`
 	SectorsRecursive        []BlkioEntry `json:"sectorsRecursive,omitempty"`
+	PSI                     *PSIStats    `json:"psi,omitempty"`
 }
 
 type Pids struct {
@@ -67,8 +75,9 @@ type CpuUsage struct {
 }
 
 type Cpu struct {
-	Usage      CpuUsage   `json:"usage,omitempty"`
-	Throttling Throttling `json:"throttling,omitempty"`
+	Usage      CpuUsage   `json:"usage,omitzero"`
+	Throttling Throttling `json:"throttling,omitzero"`
+	PSI        *PSIStats  `json:"psi,omitempty"`
 }
 
 type CPUSet struct {
@@ -94,11 +103,12 @@ type MemoryEntry struct {
 
 type Memory struct {
 	Cache     uint64            `json:"cache,omitempty"`
-	Usage     MemoryEntry       `json:"usage,omitempty"`
-	Swap      MemoryEntry       `json:"swap,omitempty"`
-	Kernel    MemoryEntry       `json:"kernel,omitempty"`
-	KernelTCP MemoryEntry       `json:"kernelTCP,omitempty"`
+	Usage     MemoryEntry       `json:"usage,omitzero"`
+	Swap      MemoryEntry       `json:"swap,omitzero"`
+	Kernel    MemoryEntry       `json:"kernel,omitzero"`
+	KernelTCP MemoryEntry       `json:"kernelTCP,omitzero"`
 	Raw       map[string]uint64 `json:"raw,omitempty"`
+	PSI       *PSIStats         `json:"psi,omitempty"`
 }
 
 type L3CacheInfo struct {
@@ -132,6 +142,9 @@ type IntelRdt struct {
 
 	// The memory bandwidth schema in 'container_id' group
 	MemBwSchema string `json:"mem_bw_schema,omitempty"`
+
+	// Schemata contains the full schemata of the ClosID (resctrl group) that the container is assigned to.
+	Schemata []string `json:"schemata,omitempty"`
 
 	// The memory bandwidth monitoring statistics from NUMA nodes in 'container_id' group
 	MBMStats *[]intelrdt.MBMNumaNodeStats `json:"mbm_stats,omitempty"`

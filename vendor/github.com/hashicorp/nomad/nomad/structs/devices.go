@@ -1,4 +1,9 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 package structs
+
+import "maps"
 
 // DeviceAccounter is used to account for device usage on a node. It can detect
 // when a node is oversubscribed and can be used for deciding what devices are
@@ -17,6 +22,26 @@ type DeviceAccounterInstance struct {
 	// Instances is a mapping of the device IDs to their usage.
 	// Only a value of 0 indicates that the instance is unused.
 	Instances map[string]int
+}
+
+// GetLocality returns the NodeDeviceLocality of the instance of the specific
+// deviceID.
+//
+// If no instance matching the deviceID is found, nil is returned.
+func (dai *DeviceAccounterInstance) GetLocality(instanceID string) *NodeDeviceLocality {
+	for _, instance := range dai.Device.Instances {
+		if instance.ID == instanceID {
+			return instance.Locality.Copy()
+		}
+	}
+	return nil
+}
+
+func (dai *DeviceAccounterInstance) Copy() *DeviceAccounterInstance {
+	return &DeviceAccounterInstance{
+		Device:    dai.Device.Copy(),
+		Instances: maps.Clone(dai.Instances),
+	}
 }
 
 // NewDeviceAccounter returns a new device accounter. The node is used to
@@ -53,6 +78,14 @@ func NewDeviceAccounter(n *Node) *DeviceAccounter {
 	}
 
 	return d
+}
+
+func (d *DeviceAccounter) Copy() *DeviceAccounter {
+	devices := make(map[DeviceIdTuple]*DeviceAccounterInstance, len(d.Devices))
+	for k, v := range d.Devices {
+		devices[k] = v.Copy()
+	}
+	return &DeviceAccounter{Devices: devices}
 }
 
 // AddAllocs takes a set of allocations and internally marks which devices are
@@ -131,9 +164,9 @@ func (d *DeviceAccounter) AddReserved(res *AllocatedDeviceResource) (collision b
 }
 
 // FreeCount returns the number of free device instances
-func (i *DeviceAccounterInstance) FreeCount() int {
+func (dai *DeviceAccounterInstance) FreeCount() int {
 	count := 0
-	for _, c := range i.Instances {
+	for _, c := range dai.Instances {
 		if c == 0 {
 			count++
 		}

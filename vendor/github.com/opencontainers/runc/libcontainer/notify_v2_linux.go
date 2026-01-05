@@ -2,10 +2,11 @@ package libcontainer
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"unsafe"
 
-	"github.com/opencontainers/runc/libcontainer/cgroups/fscommon"
+	"github.com/opencontainers/cgroups/fscommon"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
@@ -40,7 +41,11 @@ func registerMemoryEventV2(cgDir, evName, cgEvName string) (<-chan struct{}, err
 
 		for {
 			n, err := unix.Read(fd, buffer[:])
+			if err == unix.EINTR { //nolint:errorlint // unix errors are bare
+				continue
+			}
 			if err != nil {
+				err = os.NewSyscallError("read", err)
 				logrus.Warnf("unable to read event data from inotify, got error: %v", err)
 				return
 			}

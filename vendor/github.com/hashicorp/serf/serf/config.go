@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package serf
 
 import (
@@ -6,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/armon/go-metrics"
+	"github.com/hashicorp/go-metrics/compat"
 	"github.com/hashicorp/memberlist"
 )
 
@@ -266,6 +269,12 @@ type Config struct {
 
 	// MetricLabels is a map of optional labels to apply to all metrics emitted.
 	MetricLabels []metrics.Label
+
+	// MsgpackUseNewTimeFormat is used to force the underlying msgpack codec to
+	// use the newer format of time.Time when encoding, used in versions <=0.5.5
+	// by default. Decoding is not affected, as all decoders know how to decode
+	// both formats.
+	MsgpackUseNewTimeFormat bool
 }
 
 // Init allocates the subdata structures
